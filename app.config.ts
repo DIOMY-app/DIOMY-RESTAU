@@ -1,34 +1,30 @@
 // app.config.ts
-// Load environment variables with proper priority (system > .env)
-// import "./scripts/load-env.js"; 
+// Configuration optimisée pour le build APK de O'PIED DU MONT
+// Suppression temporaire de expo-audio et expo-video pour résoudre les erreurs Gradle
 
 import type { ExpoConfig } from "expo/config";
 
 // Bundle ID format: com.opieddumont.<timestamp>
-// Remplacement de "manus" par "opieddumont" pour une identité propre
 const rawBundleId = "com.opieddumont.mobile.t20260226211752";
 const bundleId =
   rawBundleId
-    .replace(/[-_]/g, ".") // Replace hyphens/underscores with dots
-    .replace(/[^a-zA-Z0-9.]/g, "") // Remove invalid chars
-    .replace(/\.+/g, ".") // Collapse consecutive dots
-    .replace(/^\.+|\.+$/g, "") // Trim leading/trailing dots
+    .replace(/[-_]/g, ".") 
+    .replace(/[^a-zA-Z0-9.]/g, "") 
+    .replace(/\.+/g, ".") 
+    .replace(/^\.+|\.+$/g, "") 
     .toLowerCase()
     .split(".")
     .map((segment) => {
-      // Android requires each segment to start with a letter
       return /^[a-zA-Z]/.test(segment) ? segment : "x" + segment;
     })
     .join(".") || "com.opieddumont.app";
 
 const timestamp = bundleId.split(".").pop()?.replace(/^t/, "") ?? "";
-// Remplacement du scheme "manus" par "opm" (O'Pied du Mont)
 const schemeFromBundleId = `opm${timestamp}`;
 
 const env = {
   appName: "O'PIED DU MONT",
   appSlug: "opied-du-mont-mobile",
-  logoUrl: "",
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
   androidPackage: bundleId,
@@ -39,8 +35,7 @@ const config: ExpoConfig = {
   slug: env.appSlug,
   version: "1.0.0",
   orientation: "portrait",
-  // Utilisation de ton logo pour l'icône générale
-  icon: "./assets/logo.png",
+  icon: "./assets/logo.png", // Utilisation de ton logo PNG converti
   scheme: env.scheme,
   userInterfaceStyle: "automatic",
   ios: {
@@ -53,7 +48,6 @@ const config: ExpoConfig = {
   android: {
     adaptiveIcon: {
       backgroundColor: "#FFFFFF",
-      // Ton logo pour l'icône Android
       foregroundImage: "./assets/logo.png",
       backgroundImage: "./assets/logo.png", 
     },
@@ -78,27 +72,18 @@ const config: ExpoConfig = {
     output: "static",
     favicon: "./assets/logo.png",
   },
+  extra: {
+    eas: {
+      projectId: "53a61250-3e29-44e4-bcf3-33aa78d530fe"
+    }
+  },
   plugins: [
     "expo-router",
     [
-      "expo-audio",
-      {
-        microphonePermission: "Allow O'PIED DU MONT to access your microphone.",
-      },
-    ],
-    [
-      "expo-video",
-      {
-        supportsBackgroundPlayback: true,
-        supportsPictureInPicture: true,
-      },
-    ],
-    [
       "expo-splash-screen",
       {
-        // Ton logo sur l'écran de démarrage
         image: "./assets/logo.png",
-        imageWidth: 250,
+        imageWidth: 200,
         resizeMode: "contain",
         backgroundColor: "#ffffff",
         dark: {
@@ -112,6 +97,9 @@ const config: ExpoConfig = {
         android: {
           buildArchs: ["armeabi-v7a", "arm64-v8a"],
           minSdkVersion: 24,
+          compileSdkVersion: 34,
+          targetSdkVersion: 34,
+          buildToolsVersion: "34.0.0"
         },
       },
     ],
