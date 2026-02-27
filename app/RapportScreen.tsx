@@ -1,6 +1,7 @@
 /**
  * RapportScreen - O'PIED DU MONT Mobile
- * Gestion comptable et performance - Correction erreurs 7006
+ * Emplacement : /app/Rapportscreen.tsx
+ * Gestion comptable et performance - Version stabilisée
  */
 
 import React, { useState, useEffect } from 'react';
@@ -9,21 +10,16 @@ import { LineChart } from "react-native-chart-kit";
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 
-// @ts-ignore
 import { ScreenContainer } from '../components/screen-container';
-// @ts-ignore
-import { useApp } from '../lib/app-context';
-// @ts-ignore
+import { useApp } from '../app-context';
 import { useColors } from '../hooks/use-colors';
-// @ts-ignore
 import { supabase } from '../supabase';
-// @ts-ignore
-import { formatPrice } from '../lib/formatting';
+import { formatPrice } from '../formatting';
 
 const screenWidth = Dimensions.get("window").width;
 
-// Définition de l'interface pour corriger les erreurs 7006 (Parameter 't' has any type)
-interface Order {
+// Interface locale pour les commandes récupérées de Supabase
+interface OrderRow {
   id: string;
   created_at: string;
   total: number;
@@ -37,7 +33,7 @@ export default function RapportScreen() {
   const user = state?.user;
 
   const [loading, setLoading] = useState(true);
-  const [rawOrders, setRawOrders] = useState<Order[]>([]);
+  const [rawOrders, setRawOrders] = useState<OrderRow[]>([]);
   const [totalClients, setTotalClients] = useState(0);
   const [chartData, setChartData] = useState<{labels: string[], datasets: {data: number[]}[]}>({
     labels: ["..."],
@@ -47,14 +43,16 @@ export default function RapportScreen() {
   const [stats, setStats] = useState({
     caTotal: 0,
     nbVentes: 0,
-    parPaiement: { especes: 0, wave: 0, orange: 0, moov: 0, carte: 0 } as any,
+    parPaiement: { especes: 0, wave: 0, orange: 0, moov: 0, carte: 0 },
   });
 
+  // Vérification stricte des permissions (Manager ou Admin)
   const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
 
   const fetchData = async () => {
     if (!isAuthorized) return;
     setLoading(true);
+    
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -63,6 +61,7 @@ export default function RapportScreen() {
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
       sevenDaysAgo.setHours(0,0,0,0);
 
+      // 1. Récupération des commandes des 7 derniers jours
       const { data: orders, error: txError } = await supabase
         .from('commandes')
         .select('*')
@@ -71,6 +70,7 @@ export default function RapportScreen() {
 
       if (txError) throw txError;
       
+      // 2. Récupération du nombre total de clients enregistrés
       const { count, error: countError } = await supabase
         .from('clients')
         .select('*', { count: 'exact', head: true });
@@ -78,11 +78,12 @@ export default function RapportScreen() {
       if (countError) throw countError;
       setTotalClients(count || 0);
 
-      const allOrders: Order[] = orders || [];
+      const allOrders: OrderRow[] = orders || [];
       
-      // Correction Erreur 1 (Ligne 77) : Typage explicite (t: Order)
-      setRawOrders(allOrders.filter((t: Order) => new Date(t.created_at) >= today));
+      // Filtrage pour les stats du jour
+      setRawOrders(allOrders.filter((t: OrderRow) => new Date(t.created_at) >= today));
 
+      // 3. Préparation des données du graphique
       const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
       const last7DaysMap: { [key: string]: number } = {};
       
@@ -95,19 +96,22 @@ export default function RapportScreen() {
       let totalJour = 0;
       let paiements = { especes: 0, wave: 0, orange: 0, moov: 0, carte: 0 };
 
-      // Correction Erreur 2 (Ligne 92) : Typage explicite (t: Order)
-      allOrders.forEach((t: Order) => {
+      allOrders.forEach((t: OrderRow) => {
         const tDate = new Date(t.created_at);
         const dayName = days[tDate.getDay()];
         
+        // Ajout au graphique si dans les 7 jours
         if (last7DaysMap[dayName] !== undefined) {
           last7DaysMap[dayName] += t.total;
         }
 
+        // Stats spécifiques à aujourd'hui
         if (tDate >= today) {
           totalJour += t.total;
           const mode = (t.payment_method || 'especes').toLowerCase();
-          if (mode in paiements) (paiements as any)[mode] += t.total;
+          if (mode in paiements) {
+            (paiements as any)[mode] += t.total;
+          }
         }
       });
 
@@ -118,13 +122,13 @@ export default function RapportScreen() {
 
       setStats({
         caTotal: totalJour,
-        // Correction Erreur 3 (Ligne 114) : Typage explicite (t: Order)
-        nbVentes: allOrders.filter((t: Order) => new Date(t.created_at) >= today).length,
+        nbVentes: allOrders.filter((t: OrderRow) => new Date(t.created_at) >= today).length,
         parPaiement: paiements,
       });
 
     } catch (err) {
       console.error("Erreur Rapport:", err);
+      Alert.alert("Erreur de synchronisation", "Impossible de récupérer les données comptables.");
     } finally {
       setLoading(false);
     }
@@ -132,17 +136,17 @@ export default function RapportScreen() {
 
   const exportToExcel = async () => {
     try {
-      let csvContent = "ID;Date;Montant;Paiement\n";
-      rawOrders.forEach((t: Order) => {
+      let csvContent = "ID;Date;Montant;Mode de Paiement\n";
+      rawOrders.forEach((t: OrderRow) => {
         const d = new Date(t.created_at);
         csvContent += `${t.id};${d.toLocaleDateString()};${t.total};${t.payment_method}\n`;
       });
 
-      const fileUri = FileSystem.cacheDirectory + `OPIED_RAPPORT.csv`;
+      const fileUri = FileSystem.cacheDirectory + `RAPPORT_VENTES_${new Date().toISOString().split('T')[0]}.csv`;
       await FileSystem.writeAsStringAsync(fileUri, csvContent);
       await Sharing.shareAsync(fileUri);
     } catch (error) {
-      Alert.alert("Erreur", "L'export a échoué.");
+      Alert.alert("Erreur Export", "L'exportation du fichier CSV a échoué.");
     }
   };
 
@@ -154,7 +158,10 @@ export default function RapportScreen() {
     return (
       <ScreenContainer style={styles.center}>
         <Text style={styles.lockIcon}>🔒</Text>
-        <Text style={{ color: colors.muted, textAlign: 'center' }}>Accès réservé.</Text>
+        <Text style={{ color: colors.foreground, fontSize: 18, fontWeight: 'bold' }}>Accès Restreint</Text>
+        <Text style={{ color: colors.muted, textAlign: 'center', marginTop: 10 }}>
+          Vous n'avez pas les permissions nécessaires pour voir les rapports financiers.
+        </Text>
       </ScreenContainer>
     );
   }
@@ -168,22 +175,22 @@ export default function RapportScreen() {
         <View style={styles.header}>
           <View>
             <Text style={[styles.title, { color: colors.foreground }]}>Rapports</Text>
-            <Text style={styles.dateSub}>O'PIED DU MONT</Text>
+            <Text style={[styles.dateSub, { color: colors.muted }]}>O'PIED DU MONT - Activité</Text>
           </View>
           <TouchableOpacity 
             style={[styles.exportBtn, { backgroundColor: colors.primary }]} 
             onPress={exportToExcel}
           >
-            <Text style={styles.exportBtnText}>EXPORT</Text>
+            <Text style={styles.exportBtnText}>CSV</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.chartWrapper}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>CA (7 jours)</Text>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Évolution CA (7j)</Text>
           <LineChart
             data={chartData}
             width={screenWidth - 32}
-            height={180}
+            height={200}
             chartConfig={{
               backgroundColor: colors.surface,
               backgroundGradientFrom: colors.surface,
@@ -191,28 +198,38 @@ export default function RapportScreen() {
               decimalPlaces: 0,
               color: (opacity = 1) => colors.primary,
               labelColor: (opacity = 1) => colors.muted,
-              propsForDots: { r: "4", strokeWidth: "2", stroke: colors.primary }
+              style: { borderRadius: 16 },
+              propsForDots: { r: "5", strokeWidth: "2", stroke: colors.primary }
             }}
             bezier
-            style={{ borderRadius: 16, marginTop: 10 }}
+            style={{ borderRadius: 16, marginTop: 15, elevation: 2 }}
           />
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={styles.cardLabel}>CA DU JOUR</Text>
+          <Text style={styles.cardLabel}>CHIFFRE D'AFFAIRES DU JOUR</Text>
           <Text style={[styles.cardValue, { color: colors.primary }]}>{formatPrice(stats.caTotal)}</Text>
-          <Text style={styles.subValue}>{stats.nbVentes} commandes</Text>
+          <View style={styles.badgeRow}>
+             <Text style={[styles.subValue, { backgroundColor: colors.background, color: colors.foreground }]}>
+               {stats.nbVentes} commandes
+             </Text>
+             <Text style={[styles.subValue, { backgroundColor: colors.background, color: colors.foreground }]}>
+               {totalClients} clients total
+             </Text>
+          </View>
         </View>
 
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Modes de paiement</Text>
-          {Object.entries(stats.parPaiement).map(([mode, montant]: any) => (
-            <View key={mode} style={styles.row}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground, marginBottom: 10 }]}>Détails par Paiement</Text>
+          {Object.entries(stats.parPaiement).map(([mode, montant]) => (
+            <View key={mode} style={[styles.row, { borderBottomColor: colors.border }]}>
               <Text style={styles.label}>{mode.toUpperCase()}</Text>
               <Text style={[styles.val, { color: colors.foreground }]}>{formatPrice(montant)}</Text>
             </View>
           ))}
         </View>
+        
+        <View style={{ height: 40 }} />
       </ScrollView>
     </ScreenContainer>
   );
@@ -220,21 +237,22 @@ export default function RapportScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  lockIcon: { fontSize: 50, marginBottom: 20 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 },
+  lockIcon: { fontSize: 60, marginBottom: 20 },
   header: { marginTop: 10, marginBottom: 25, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  title: { fontSize: 28, fontWeight: 'bold' },
-  dateSub: { color: '#94a3b8', fontSize: 14 },
-  exportBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
-  exportBtnText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
-  chartWrapper: { marginBottom: 25 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold' },
-  card: { padding: 25, borderRadius: 20, borderWidth: 1, alignItems: 'center', marginBottom: 20 },
-  cardLabel: { fontSize: 11, color: '#64748b', fontWeight: 'bold' },
-  cardValue: { fontSize: 32, fontWeight: '900', marginVertical: 8 },
-  subValue: { fontSize: 13, color: '#94a3b8' },
-  section: { padding: 20, borderRadius: 20, borderWidth: 1 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  label: { color: '#64748b', fontSize: 13, fontWeight: '600' },
-  val: { fontWeight: 'bold', fontSize: 15 }
+  title: { fontSize: 32, fontWeight: '900', letterSpacing: -1 },
+  dateSub: { fontSize: 14, fontWeight: '600' },
+  exportBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14, elevation: 3 },
+  exportBtnText: { color: 'white', fontSize: 13, fontWeight: '900' },
+  chartWrapper: { marginBottom: 30 },
+  sectionTitle: { fontSize: 18, fontWeight: '800' },
+  card: { padding: 25, borderRadius: 24, borderWidth: 1, alignItems: 'center', marginBottom: 25, elevation: 4, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10 },
+  cardLabel: { fontSize: 11, color: '#64748b', fontWeight: '900', letterSpacing: 1 },
+  cardValue: { fontSize: 34, fontWeight: '900', marginVertical: 10 },
+  badgeRow: { flexDirection: 'row', gap: 10, marginTop: 5 },
+  subValue: { fontSize: 12, fontWeight: '700', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
+  section: { padding: 20, borderRadius: 24, borderWidth: 1, marginBottom: 20 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 18, borderBottomWidth: 1 },
+  label: { color: '#64748b', fontSize: 13, fontWeight: '800' },
+  val: { fontWeight: '900', fontSize: 16 }
 });

@@ -1,8 +1,11 @@
 /**
  * AppContext - Global State Management for O'PIED DU MONT
+ * Emplacement : racine (./app-context.tsx)
+ * Version stabilisée pour APK
  */
 
 import React, { createContext, useReducer, ReactNode, useContext } from 'react';
+// Vérifie que types.ts est bien à la racine avec ce fichier
 import type { AppContextType, User, CartItem, Order } from './types';
 
 // ─── TYPES & ACTIONS ──────────────────────────────────────────────────────────
@@ -53,27 +56,32 @@ function appReducer(state: AppContextType, action: AppAction): AppContextType {
       return { ...state, ...action.payload, isLoading: false };
 
     case 'ADD_TO_CART': {
-      const existingItem = state.cart.find((item) => item.menuItemId === action.payload.menuItemId);
+      const currentCart = state.cart || [];
+      const existingItem = currentCart.find((item) => item.menuItemId === action.payload.menuItemId);
+      
       if (existingItem) {
         return {
           ...state,
-          cart: state.cart.map((item) =>
+          cart: currentCart.map((item) =>
             item.menuItemId === action.payload.menuItemId
-              ? { ...item, quantity: item.quantity + action.payload.quantity }
+              ? { ...item, quantity: (item.quantity || 0) + (action.payload.quantity || 1) }
               : item
           ),
         };
       }
-      return { ...state, cart: [...state.cart, action.payload] };
+      return { ...state, cart: [...currentCart, action.payload] };
     }
 
     case 'REMOVE_FROM_CART':
-      return { ...state, cart: state.cart.filter((item) => item.id !== action.payload) };
+      return { 
+        ...state, 
+        cart: (state.cart || []).filter((item) => item.id !== action.payload) 
+      };
 
     case 'UPDATE_CART_ITEM':
       return {
         ...state,
-        cart: state.cart.map((item) =>
+        cart: (state.cart || []).map((item) =>
           item.id === action.payload.id
             ? { ...item, quantity: action.payload.quantite }
             : item
@@ -84,7 +92,10 @@ function appReducer(state: AppContextType, action: AppAction): AppContextType {
       return { ...state, cart: [] };
 
     case 'ADD_ORDER':
-      return { ...state, orders: [action.payload, ...state.orders] };
+      return { 
+        ...state, 
+        orders: [action.payload, ...(state.orders || [])] 
+      };
 
     case 'RESET':
       return { ...initialState };
@@ -111,6 +122,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 export function useApp() {
   const context = useContext(AppContext);
   if (!context) {
+    // Log utile pour débugger l'APK si le provider est manquant dans l'arbre
+    console.error('Erreur: useApp utilisé hors du AppProvider');
     throw new Error('useApp must be used within AppProvider');
   }
   return context;

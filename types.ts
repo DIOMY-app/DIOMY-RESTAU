@@ -1,12 +1,14 @@
 /**
  * Types for O'PIED DU MONT Mobile App
+ * Emplacement : racine (./types.ts)
+ * Version synchronisée avec Supabase et les composants UI
  */
 
 export interface User {
   id: string;
-  email: string;
-  name: string;
-  role: 'admin' | 'manager' | 'staff';
+  nom: string;      // Remplacé 'name' par 'nom'
+  telephone: string; // Remplacé 'email' par 'telephone'
+  role: 'admin' | 'manager' | 'staff' | 'waiter' | 'chef' | 'cashier';
   createdAt: string;
   updatedAt: string;
 }
@@ -49,7 +51,7 @@ export interface CartItem {
   menuItemId: string;
   name: string;
   price: number;
-  quantity: number;
+  quantity: number; // Harmonisé avec le reducer
   notes?: string;
 }
 
@@ -59,20 +61,20 @@ export interface Order {
   total: number;
   paymentMethod: 'cash' | 'card' | 'check';
   status: 'pending' | 'completed' | 'cancelled';
-  createdAt: string;
-  updatedAt: string;
+  statut?: 'attente' | 'paye' | 'annule'; // Ajouté pour la compatibilité UI (index.tsx)
+  created_at: string; // Format Supabase
+  updated_at: string;
 }
 
 export interface Employee {
   id: string;
-  name: string;
-  email: string;
-  phone?: string;
+  nom: string;
+  telephone: string;
   role: string;
-  status: 'active' | 'inactive';
+  est_actif: boolean;
   hireDate: string;
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Schedule {

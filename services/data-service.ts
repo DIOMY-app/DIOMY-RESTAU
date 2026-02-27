@@ -1,7 +1,7 @@
 /**
  * Data Service - O'PIED DU MONT
- * Gère la synchronisation, les recettes complexes et l'envoi en cuisine
- * Version corrigée avec respect strict des types (createdAt, updatedAt)
+ * Gère la synchronisation globale (Menu, Catégories, Stocks, Employés)
+ * Version Centralisée : Charge toutes les données vitales au démarrage
  */
 
 import { supabase } from '../supabase';
@@ -9,65 +9,98 @@ import { AppAction } from '../app-context';
 import { CartItem } from '../types';
 
 /**
- * Rafraîchit les données (Categories et Menu)
+ * Rafraîchit TOUTES les données de l'application
+ * Appelé au démarrage et lors d'un "Pull to Refresh"
  */
 export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
   dispatch({ type: 'SET_LOADING', payload: true });
 
   try {
-    // 1. Charger les catégories
-    const { data: categoriesData, error: catError } = await supabase
-      .from('categories')
-      .select('*');
-
-    if (catError) throw catError;
-
-    // 2. Charger les articles du menu
-    const { data: menuData, error: menuError } = await supabase
-      .from('menu') 
-      .select('*')
-      .eq('actif', true); 
-
-    if (menuError) throw menuError;
-
-    // 3. Transformation avec respect strict des interfaces Category et MenuItem
     const now = new Date().toISOString();
 
-    const formattedCategories = categoriesData.map(cat => ({
+    // 1. Chargement parallèle pour plus de rapidité (Promise.all)
+    const [
+      { data: categoriesData, error: catError },
+      { data: menuData, error: menuError },
+      { data: stockData, error: stockError },
+      { data: employeesData, error: empError }
+    ] = await Promise.all([
+      supabase.from('categories').select('*'),
+      supabase.from('menu').select('*').eq('actif', true),
+      supabase.from('stock').select('*'),
+      supabase.from('employes').select('*').eq('actif', true)
+    ]);
+
+    // Vérification des erreurs
+    if (catError) throw catError;
+    if (menuError) throw menuError;
+    if (stockError) throw stockError;
+    if (empError) throw empError;
+
+    // 2. Formatage des Catégories
+    const formattedCategories = (categoriesData || []).map(cat => ({
       id: cat.id.toString(),
       name: cat.nom,
       color: cat.couleur || '#EAB308',
       icon: cat.icone || '🍴',
-      createdAt: cat.created_at || now, // Ajout pour corriger l'erreur TS
-      updatedAt: cat.created_at || now  // Ajout pour corriger l'erreur TS
+      createdAt: cat.created_at || now,
+      updatedAt: cat.created_at || now
     }));
 
-    const formattedMenuItems = menuData.map(item => {
-      const categoryObj = categoriesData.find(c => c.id === item.categorie_id);
+    // 3. Formatage du Menu avec lien catégorie
+    const formattedMenuItems = (menuData || []).map(item => {
+      const categoryObj = formattedCategories.find(c => c.id === item.categorie_id.toString());
       return {
         id: item.id.toString(),
         name: item.nom,
         description: item.description || '',
         price: Number(item.prix),
-        category: categoryObj ? categoryObj.nom : 'Autre',
+        category: categoryObj ? categoryObj.name : 'Autre',
         available: item.actif,
         image: item.image || '',
-        createdAt: item.created_at || now, // Ajout pour corriger l'erreur TS
-        updatedAt: item.created_at || now  // Ajout pour corriger l'erreur TS
+        createdAt: item.created_at || now,
+        updatedAt: item.created_at || now
       };
     });
 
-    // 4. Envoi au State Global
+    // 4. Formatage des Stocks (pour alertes temps réel)
+    const formattedStocks = (stockData || []).map(s => ({
+      id: s.id.toString(),
+      name: s.nom,
+      quantity: Number(s.quantite),
+      unit: s.unite || 'pcs',
+      minQuantity: Number(s.seuil_alerte) || 5,
+      maxQuantity: 100, // Valeur par défaut
+      lastUpdated: s.derniere_mise_a_jour || now,
+      createdAt: now,
+      updatedAt: now
+    }));
+
+    // 5. Formatage des Employés (pour PinPad local)
+    const formattedEmployees = (employeesData || []).map(emp => ({
+      id: emp.id.toString(),
+      nom: emp.nom,
+      telephone: emp.telephone || '',
+      role: emp.role || 'staff',
+      est_actif: emp.actif,
+      hireDate: emp.created_at || now,
+      created_at: emp.created_at || now,
+      updated_at: emp.created_at || now
+    }));
+
+    // 6. Mise à jour massive du State Global
     dispatch({
       type: 'SET_DATA',
       payload: {
         categories: formattedCategories,
         menuItems: formattedMenuItems,
+        stockItems: formattedStocks,
+        employees: formattedEmployees
       }
     });
 
   } catch (error: any) {
-    console.error('Erreur Sync:', error.message);
+    console.error('Erreur Synchronisation Globale:', error.message);
     dispatch({ type: 'SET_ERROR', payload: error.message });
   } finally {
     dispatch({ type: 'SET_LOADING', payload: false });
@@ -76,18 +109,19 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
 
 /**
  * LOGIQUE COMPLEXE : Déduit les stocks via la table 'menu_recettes'
+ * Utilisé lors de la validation du panier à la caisse.
  */
 export const deductStockFromOrder = async (items: CartItem[]) => {
   try {
     for (const item of items) {
-      // 1. Chercher la recette
+      // On cherche si l'article possède une recette (ingrédients multiples)
       const { data: recette, error: recipeError } = await supabase
         .from('menu_recettes')
         .select('stock_id, quantite_consommee')
-        .eq('menu_id', parseInt(item.menuItemId));
+        .eq('menu_id', parseInt(item.menuItemId || item.id));
 
       if (!recipeError && recette && recette.length > 0) {
-        // Cas A : Déduction par ingrédients (Recette complexe)
+        // Cas A : Déduction par ingrédients (ex: Crêpe -> Farine, Lait)
         for (const ingredient of recette) {
           const { data: stockNow } = await supabase
             .from('stock')
@@ -104,7 +138,7 @@ export const deductStockFromOrder = async (items: CartItem[]) => {
           }
         }
       } else {
-        // Cas B : Déduction directe (Boissons, etc.)
+        // Cas B : Déduction directe (ex: Canette de Coca)
         const { data: stockItem } = await supabase
           .from('stock')
           .select('id, quantite')
@@ -121,13 +155,13 @@ export const deductStockFromOrder = async (items: CartItem[]) => {
     }
     return { success: true };
   } catch (error: any) {
-    console.error('Erreur Stock Complexe:', error.message);
+    console.error('Erreur Déstockage Service:', error.message);
     throw error;
   }
 };
 
 /**
- * ENVOI EN CUISINE (Remplacement total de la logique Web)
+ * ENVOI EN CUISINE 
  */
 export const sendToKitchen = async (transactionId: number, tableNum: number | null, items: CartItem[]) => {
   try {
@@ -136,12 +170,13 @@ export const sendToKitchen = async (transactionId: number, tableNum: number | nu
       .insert([{
         transaction_id: transactionId,
         table_numero: tableNum,
-        items: items, // On envoie le JSON du panier
+        items: items, 
         statut: 'en_attente'
       }]);
 
     if (error) throw error;
   } catch (error: any) {
-    console.error('Erreur Envoi Cuisine:', error.message);
+    console.error('Erreur Envoi Cuisine Service:', error.message);
+    throw error;
   }
 };
