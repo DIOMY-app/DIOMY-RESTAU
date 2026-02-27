@@ -74,7 +74,7 @@ const config: ExpoConfig = {
   },
   extra: {
     eas: {
-      projectId: "53a61250-3e29-44e4-bcf3-33aa78d530fe"
+      projectId: "5accbe7c-8052-4c53-9e57-ca8eef4c83fb"
     }
   },
   plugins: [
