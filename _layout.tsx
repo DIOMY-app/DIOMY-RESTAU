@@ -1,26 +1,33 @@
 /**
  * Root Layout - O'PIED DU MONT Mobile
- * Gère l'initialisation Supabase et l'empilement des Context Providers
+ * Gère l'initialisation Supabase avec protection contre les crashs au démarrage
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Slot } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 // @ts-ignore
 import { AppProvider, useApp } from './app-context'; 
 // @ts-ignore
-import { CartProvider } from '../context/cart-context'; // Import du nouveau context
+import { CartProvider } from '../context/cart-context';
 // @ts-ignore
 import { supabase } from './supabase';
 
+// Empêche le splash screen de se cacher automatiquement
+SplashScreen.preventAutoHideAsync().catch(() => {
+  /* ignore errors */
+});
+
 function AppInitializer() {
   const { dispatch } = useApp();
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const loadInitialData = async () => {
-      dispatch({ type: 'SET_LOADING', payload: true });
-
       try {
-        // Chargement parallèle pour plus de rapidité (Tables en Français)
+        dispatch({ type: 'SET_LOADING', payload: true });
+
+        // Chargement des données essentielles pour O'PIED DU MONT
         const [
           { data: categories, error: catError },
           { data: menu, error: menuError },
@@ -34,10 +41,9 @@ function AppInitializer() {
         ]);
 
         if (catError || menuError || stockError || empError) {
-          throw new Error("Erreur lors de la récupération des données.");
+          console.warn("Certaines données n'ont pas pu être chargées, l'app continue quand même.");
         }
 
-        // On injecte tout dans le contexte global via SET_DATA
         dispatch({
           type: 'SET_DATA',
           payload: {
@@ -50,19 +56,23 @@ function AppInitializer() {
 
       } catch (error: any) {
         dispatch({ type: 'SET_ERROR', payload: error.message });
-        console.error("Erreur d'initialisation:", error.message);
+        console.error("Erreur d'initialisation critique:", error.message);
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
+        setIsReady(true);
+        // On cache le splash screen seulement quand tout est chargé
+        await SplashScreen.hideAsync().catch(() => {});
       }
     };
 
     loadInitialData();
 
-    // Ecoute des changements en temps réel sur les stocks
+    // Ecoute des changements en temps réel
     const stockSubscription = supabase
       .channel('stock-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock' }, () => {
-        loadInitialData();
+        // Optionnel : ne pas recharger tout le initialData pour éviter les boucles de crash
+        // loadInitialData(); 
       })
       .subscribe();
 
@@ -70,6 +80,9 @@ function AppInitializer() {
       supabase.removeChannel(stockSubscription);
     };
   }, [dispatch]);
+
+  // Si l'app n'est pas prête, on ne rend rien (le splash screen reste affiché)
+  if (!isReady) return null;
 
   return <Slot />;
 }
