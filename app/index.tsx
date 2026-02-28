@@ -1,11 +1,14 @@
 /**
  * HomeScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/index.tsx
- * Correction : Synchronisation stricte des routes avec les fichiers physiques (caisse, stock, CuisineScreen, etc.)
+ * Correction : Intégration de la logique de profil et déconnexion via Modal
  */
 
-import React from "react";
-import { ScrollView, Text, View, TouchableOpacity, StyleSheet, Dimensions, ActivityIndicator } from "react-native";
+import React, { useState } from "react";
+import { 
+  ScrollView, Text, View, TouchableOpacity, StyleSheet, 
+  Dimensions, ActivityIndicator, Modal, Alert 
+} from "react-native";
 import { useRouter } from "expo-router";
 
 import { ScreenContainer } from "../components/screen-container";
@@ -24,13 +27,12 @@ interface QuickAction {
   allowedRoles: string[];
 }
 
-// CORRECTION : Routes alignées sur le contenu réel de ton dossier /app
 const QUICK_ACTIONS: QuickAction[] = [
   { 
     id: '1', 
     label: 'Caisse', 
     icon: '🛒', 
-    route: 'caisse', // Correspond à caisse.tsx
+    route: 'caisse', 
     color: '#8B6F47',
     allowedRoles: ['admin', 'manager', 'waiter', 'cashier', 'staff'] 
   },
@@ -38,7 +40,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     id: '2', 
     label: 'Cuisine', 
     icon: '👨‍🍳', 
-    route: 'CuisineScreen', // Correspond à CuisineScreen.tsx
+    route: 'CuisineScreen', 
     color: '#EAB308',
     allowedRoles: ['admin', 'manager', 'chef', 'waiter', 'staff'] 
   },
@@ -46,7 +48,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     id: '3', 
     label: 'Stock', 
     icon: '📦', 
-    route: 'stock', // Correspond à stock.tsx (tu avais 'stocks')
+    route: 'stock', 
     color: '#D4A574',
     allowedRoles: ['admin', 'manager', 'chef', 'staff'] 
   },
@@ -54,7 +56,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     id: '4', 
     label: 'Rapports', 
     icon: '📈', 
-    route: 'RapportScreen', // Correspond à RapportScreen.tsx
+    route: 'RapportScreen', 
     color: '#6BA55D',
     allowedRoles: ['admin', 'manager', 'staff'] 
   },
@@ -62,7 +64,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     id: '5', 
     label: 'Équipe', 
     icon: '👥', 
-    route: 'employees', // Correspond à employees.tsx
+    route: 'employees', 
     color: '#C85A54',
     allowedRoles: ['admin', 'manager', 'staff'] 
   },
@@ -71,9 +73,11 @@ const QUICK_ACTIONS: QuickAction[] = [
 export default function HomeScreen() {
   const router = useRouter();
   const colors = useColors();
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   
-  // Sécurité anti-crash si le state n'est pas encore chargé
+  // État pour la visibilité du profil
+  const [isProfileVisible, setIsProfileVisible] = useState(false);
+
   if (!state) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
@@ -99,6 +103,25 @@ export default function HomeScreen() {
     router.push(`/${route}`);
   };
 
+  const handleLogout = () => {
+    Alert.alert(
+      "Déconnexion",
+      "Voulez-vous quitter l'application ?",
+      [
+        { text: "Annuler", style: "cancel" },
+        { 
+          text: "Se déconnecter", 
+          style: "destructive", 
+          onPress: () => {
+            setIsProfileVisible(false);
+            dispatch({ type: 'SET_USER', payload: null });
+            router.replace('/login');
+          } 
+        }
+      ]
+    );
+  };
+
   const recentOrders = todayOrders.slice(-3).reverse();
 
   return (
@@ -109,6 +132,7 @@ export default function HomeScreen() {
       >
         <View style={styles.gap6}>
           
+          {/* HEADER AVEC ACTION PROFIL */}
           <View style={styles.headerRow}>
             <View>
               <Text style={[styles.title, { color: colors.foreground }]}>O'PIED DU MONT</Text>
@@ -123,13 +147,13 @@ export default function HomeScreen() {
             </View>
             <TouchableOpacity 
               style={[styles.avatarCircle, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => router.push('/profile' as any)}
+              onPress={() => setIsProfileVisible(true)} // Ouvre la modale au lieu de naviguer
             >
               <Text style={{ fontSize: 20 }}>👤</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Section Statistiques conservée */}
+          {/* Section Statistiques */}
           {['admin', 'manager', 'cashier', 'staff', 'waiter'].includes(userRole) && (
             <View style={styles.statsRow}>
               <View style={[styles.statBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -147,27 +171,23 @@ export default function HomeScreen() {
           <View>
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Services</Text>
             <View style={styles.actionGrid}>
-              {filteredActions.length > 0 ? (
-                filteredActions.map((action) => (
-                  <TouchableOpacity
-                    key={action.id}
-                    style={[styles.actionCard, { backgroundColor: action.color }]}
-                    onPress={() => handleQuickAction(action.route)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.iconCircle}>
-                      <Text style={{ fontSize: 24 }}>{action.icon}</Text>
-                    </View>
-                    <Text style={styles.actionLabel}>{action.label}</Text>
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <Text style={{ color: colors.muted }}>Aucun service disponible pour votre rôle.</Text>
-              )}
+              {filteredActions.map((action) => (
+                <TouchableOpacity
+                  key={action.id}
+                  style={[styles.actionCard, { backgroundColor: action.color }]}
+                  onPress={() => handleQuickAction(action.route)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.iconCircle}>
+                    <Text style={{ fontSize: 24 }}>{action.icon}</Text>
+                  </View>
+                  <Text style={styles.actionLabel}>{action.label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
-          {/* Section Ventes Récentes conservée */}
+          {/* Ventes Récentes */}
           {recentOrders.length > 0 && (
             <View>
               <View style={[styles.rowBetween, { marginBottom: 12 }]}>
@@ -213,6 +233,43 @@ export default function HomeScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* MODAL DE PROFIL (La logique qui manquait) */}
+      <Modal visible={isProfileVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.foreground }]}>Mon Compte</Text>
+              <TouchableOpacity onPress={() => setIsProfileVisible(false)}>
+                <Text style={{ color: colors.muted, fontWeight: '900' }}>FERMER</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.profileInfo}>
+              <View style={[styles.avatarLarge, { backgroundColor: colors.primary }]}>
+                <Text style={styles.avatarTextLarge}>{userName.substring(0, 1).toUpperCase()}</Text>
+              </View>
+              <Text style={[styles.profileName, { color: colors.foreground }]}>{userName}</Text>
+              <Text style={{ color: colors.muted }}>{user?.telephone}</Text>
+            </View>
+
+            <View style={[styles.infoCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>RÔLE</Text>
+                <Text style={[styles.infoVal, { color: colors.primary }]}>{userRole.toUpperCase()}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity 
+              style={styles.logoutBtn} 
+              onPress={handleLogout}
+            >
+              <Text style={styles.logoutBtnText}>SE DÉCONNECTER</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </ScreenContainer>
   );
 }
@@ -246,5 +303,21 @@ const styles = StyleSheet.create({
   actionLabel: { color: 'white', fontWeight: '900', fontSize: 16 },
   ordersContainer: { borderRadius: 24, borderWidth: 1.5, overflow: 'hidden' },
   orderRow: { padding: 20 },
-  statusPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 }
+  statusPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  
+  // Styles pour la Modal de Profil
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  modalContent: { borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 30, paddingBottom: 50 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
+  modalTitle: { fontSize: 22, fontWeight: '900' },
+  profileInfo: { alignItems: 'center', marginBottom: 30 },
+  avatarLarge: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
+  avatarTextLarge: { color: 'white', fontSize: 32, fontWeight: '900' },
+  profileName: { fontSize: 24, fontWeight: '900', marginBottom: 5 },
+  infoCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 30 },
+  infoItem: { alignItems: 'center' },
+  infoLabel: { fontSize: 10, fontWeight: '900', color: '#94a3b8', marginBottom: 5 },
+  infoVal: { fontSize: 16, fontWeight: '900' },
+  logoutBtn: { backgroundColor: '#fee2e2', paddingVertical: 18, borderRadius: 20, alignItems: 'center' },
+  logoutBtnText: { color: '#ef4444', fontWeight: '900', fontSize: 15, letterSpacing: 1 }
 });

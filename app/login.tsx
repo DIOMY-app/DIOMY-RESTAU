@@ -1,11 +1,14 @@
 /**
  * Login Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/login.tsx
- * Correction : Intégration du champ 'telephone' après mise à jour des types
+ * Version : Stabilisée avec mapping 'telephone' et 'nom'
  */
 
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet, SafeAreaView } from 'react-native';
+import { 
+  View, Text, TextInput, TouchableOpacity, ScrollView, 
+  ActivityIndicator, StyleSheet, SafeAreaView, Alert 
+} from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { useApp } from '../app-context';
@@ -42,12 +45,12 @@ export default function LoginScreen() {
     setIsLoading(true);
 
     try {
-      // 1. Recherche de l'employé dans la table 'employes'
+      // 1. Recherche de l'employé (Utilisation de maybeSingle pour éviter le crash si non trouvé)
       const { data: employee, error: dbError } = await supabase
         .from('employes')
         .select('*')
         .eq('telephone', cleanPhone)
-        .single();
+        .maybeSingle();
 
       if (dbError || !employee) {
         setError('Compte introuvable ou numéro incorrect');
@@ -55,33 +58,35 @@ export default function LoginScreen() {
         return;
       }
 
+      // 2. Vérification du statut du compte
       if (!employee.est_actif) {
         setError('Ce compte est désactivé. Contactez la direction.');
         setIsLoading(false);
         return;
       }
 
-      // 2. Vérification du mot de passe
-      if (employee.password && employee.password !== password) {
+      // 3. Vérification du mot de passe
+      if (employee.password !== password) {
         setError('Mot de passe incorrect');
         setIsLoading(false);
         return;
       }
       
-      // 3. Mise à jour du contexte global (Utilise 'telephone' et 'nom')
+      // 4. Mise à jour du contexte global
+      // Alignement strict avec types.ts : telephone et nom
       dispatch({
         type: 'SET_USER',
         payload: {
-          id: employee.id,
+          id: employee.id.toString(),
           nom: employee.nom,
           role: employee.role, 
-          telephone: employee.telephone, // OK si types.ts est mis à jour
+          telephone: employee.telephone,
           createdAt: employee.created_at,
           updatedAt: new Date().toISOString(),
         },
       });
 
-      // 4. Redirection vers l'accueil
+      // 5. Redirection vers l'accueil (tabs)
       router.replace('/');
       
     } catch (err) {
@@ -99,11 +104,11 @@ export default function LoginScreen() {
           
           <View style={styles.header}>
             <Text style={[styles.logo, { color: colors.primary }]}>O'PIED DU MONT</Text>
-            <Text style={[styles.subtitle, { color: colors.muted, fontWeight: '600' }]}>Espace Personnel</Text>
+            <Text style={[styles.subtitle, { color: colors.muted, fontWeight: '800' }]}>ESPACE PERSONNEL</Text>
           </View>
 
           {error && (
-            <View style={styles.errorBox}>
+            <View style={[styles.errorBox, { borderColor: '#ef4444' }]}>
               <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
@@ -113,8 +118,9 @@ export default function LoginScreen() {
             <TextInput
               style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
               placeholder="0708091011"
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={colors.muted}
               keyboardType="phone-pad"
+              maxLength={10}
               value={phone}
               onChangeText={setPhone}
             />
@@ -125,7 +131,7 @@ export default function LoginScreen() {
             <TextInput
               style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
               placeholder="••••••"
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={colors.muted}
               secureTextEntry
               value={password}
               onChangeText={setPassword}
@@ -136,6 +142,7 @@ export default function LoginScreen() {
             style={[styles.loginBtn, { backgroundColor: colors.primary, opacity: isLoading ? 0.6 : 1 }]}
             onPress={handleLogin}
             disabled={isLoading}
+            activeOpacity={0.8}
           >
             {isLoading ? (
               <ActivityIndicator color="white" />
@@ -146,14 +153,17 @@ export default function LoginScreen() {
 
           <View style={styles.footer}>
             <Text style={{ color: colors.muted }}>Besoin d'aide ? </Text>
-            <TouchableOpacity onPress={() => alert("Contactez votre administrateur pour réinitialiser votre accès.")}>
-              <Text style={{ color: colors.primary, fontWeight: 'bold' }}>Cliquez ici</Text>
+            <TouchableOpacity onPress={() => Alert.alert("Assistance", "Contactez votre administrateur pour réinitialiser votre accès.")}>
+              <Text style={{ color: colors.primary, fontWeight: '900' }}>Cliquez ici</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.demoBox}>
-            <Text style={styles.demoTitle}>SÉCURITÉ</Text>
-            <Text style={styles.demoText}>Cette application est réservée à l'usage interne du restaurant O'PIED DU MONT.</Text>
+          <View style={[styles.demoBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.demoTitle, { color: colors.muted }]}>SÉCURITÉ</Text>
+            <Text style={[styles.demoText, { color: colors.foreground }]}>
+              Cette application est réservée à l'usage interne du restaurant O'PIED DU MONT. 
+              Toute tentative d'accès non autorisé est journalisée.
+            </Text>
           </View>
           
         </View>
@@ -167,17 +177,17 @@ const styles = StyleSheet.create({
   scrollContent: { flexGrow: 1 },
   innerContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40 },
   header: { alignItems: 'center', marginBottom: 45 },
-  logo: { fontSize: 34, fontWeight: '900', marginBottom: 8, letterSpacing: -1 },
-  subtitle: { fontSize: 16 },
-  errorBox: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#ef4444', padding: 14, borderRadius: 12, marginBottom: 25 },
-  errorText: { color: '#ef4444', textAlign: 'center', fontWeight: 'bold' },
+  logo: { fontSize: 34, fontWeight: '900', marginBottom: 8, letterSpacing: -1.5 },
+  subtitle: { fontSize: 13, textTransform: 'uppercase', letterSpacing: 1.5 },
+  errorBox: { backgroundColor: '#fee2e2', borderWidth: 1, padding: 14, borderRadius: 16, marginBottom: 25 },
+  errorText: { color: '#ef4444', textAlign: 'center', fontWeight: '800', fontSize: 13 },
   inputGroup: { marginBottom: 22 },
-  label: { fontSize: 14, fontWeight: '700', marginBottom: 10, marginLeft: 4 },
-  input: { borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 14, fontSize: 16 },
-  loginBtn: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 15, marginBottom: 25, elevation: 4 },
-  loginBtnText: { color: 'white', fontSize: 17, fontWeight: 'bold' },
+  label: { fontSize: 13, fontWeight: '800', marginBottom: 10, marginLeft: 4, textTransform: 'uppercase' },
+  input: { borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 15, fontSize: 16, fontWeight: '600' },
+  loginBtn: { borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 15, marginBottom: 25, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5 },
+  loginBtnText: { color: 'white', fontSize: 17, fontWeight: '900' },
   footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  demoBox: { marginTop: 50, padding: 20, backgroundColor: '#f8fafc', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0' },
-  demoTitle: { fontSize: 11, fontWeight: '900', color: '#64748b', marginBottom: 6, textAlign: 'center' },
-  demoText: { fontSize: 12, color: '#475569', textAlign: 'center', lineHeight: 18 }
+  demoBox: { marginTop: 50, padding: 20, borderRadius: 20, borderWidth: 1 },
+  demoTitle: { fontSize: 11, fontWeight: '900', marginBottom: 8, textAlign: 'center', letterSpacing: 1 },
+  demoText: { fontSize: 12, textAlign: 'center', lineHeight: 18, opacity: 0.8 }
 });

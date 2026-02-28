@@ -1,7 +1,7 @@
 /**
  * Menu Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/menu.tsx
- * Connecté à Supabase via AppContext
+ * Version : Stabilisée et typée pour APK
  */
 
 import React, { useState } from 'react';
@@ -11,6 +11,7 @@ import { ScreenContainer } from '../components/screen-container';
 import { useColors } from '../hooks/use-colors';
 import { formatPrice } from '../formatting';
 import { useApp } from '../app-context';
+import { MenuItem, Category } from '../types';
 
 export default function MenuScreen() {
   const colors = useColors();
@@ -19,12 +20,13 @@ export default function MenuScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('Tous');
 
-  // Récupération dynamique des catégories depuis le state global
-  const categories = ['Tous', ...state.categories.map((c: any) => c.nom || c.name)];
+  // Récupération sécurisée des catégories
+  const categories = ['Tous', ...state.categories.map((c: Category) => c.name)];
 
-  const filteredItems = state.menuItems.filter((item: any) => {
-    const itemName = item.nom || item.name || '';
-    const itemCat = item.categorie || item.category || '';
+  // Filtrage basé sur les clés formatées par data-service
+  const filteredItems = state.menuItems.filter((item: MenuItem) => {
+    const itemName = item.name || '';
+    const itemCat = item.category || '';
     
     const matchesSearch = itemName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = activeCategory === 'Tous' || itemCat === activeCategory;
@@ -32,18 +34,18 @@ export default function MenuScreen() {
     return matchesSearch && matchesCategory;
   });
 
-  const handleAddToCart = (item: any) => {
+  const handleAddToCart = (item: MenuItem) => {
     dispatch({
       type: 'ADD_TO_CART',
       payload: {
-        id: Math.random().toString(36).substr(2, 9), // ID unique pour l'entrée du panier
+        id: Math.random().toString(36).substring(2, 11), // ID unique d'instance dans le panier
         menuItemId: item.id,
-        name: item.nom || item.name,
-        price: item.prix || item.price,
-        quantity: 1
+        name: item.name,
+        price: item.price,
+        quantity: 1,
+        quantite: 1 // Double mapping pour compatibilité Reducer
       }
     });
-    // Optionnel : Ajouter un feedback haptique ou un toast ici
   };
 
   return (
@@ -94,29 +96,35 @@ export default function MenuScreen() {
             <Text style={[styles.infoText, { color: colors.muted, marginTop: 10 }]}>Chargement du menu...</Text>
           </View>
         ) : filteredItems.length > 0 ? (
-          filteredItems.map((item: any) => (
+          filteredItems.map((item: MenuItem) => (
             <View 
               key={item.id} 
               style={[styles.itemCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
               <View style={styles.itemInfo}>
                 <View style={styles.flex1}>
-                  <Text style={[styles.itemName, { color: colors.foreground }]}>{item.nom || item.name}</Text>
+                  <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
                   <Text style={[styles.itemDesc, { color: colors.muted }]} numberOfLines={2}>
                     {item.description || "Aucune description disponible."}
                   </Text>
                 </View>
                 <Text style={[styles.itemPrice, { color: colors.primary }]}>
-                  {formatPrice(item.prix || item.price || 0)}
+                  {formatPrice(item.price)}
                 </Text>
               </View>
               
               <TouchableOpacity 
-                style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                onPress={() => handleAddToCart(item)}
+                style={[
+                  styles.addBtn, 
+                  { backgroundColor: item.available ? colors.primary : colors.muted }
+                ]}
+                onPress={() => item.available && handleAddToCart(item)}
                 activeOpacity={0.7}
+                disabled={!item.available}
               >
-                <Text style={styles.addBtnText}>Ajouter à la commande</Text>
+                <Text style={styles.addBtnText}>
+                  {item.available ? "Ajouter à la commande" : "Indisponible"}
+                </Text>
               </TouchableOpacity>
             </View>
           ))

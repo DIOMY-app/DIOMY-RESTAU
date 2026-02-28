@@ -1,87 +1,81 @@
 /**
  * Stock Management Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/stocks.tsx
- * Correction : Synchronisation totale avec le schéma SQL (nom, quantite, seuil_alerte)
+ * Correction : Harmonisation avec types.ts et mise à jour du State Global
  */
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, ActivityIndicator, Alert, RefreshControl } from 'react-native';
+import { 
+  View, Text, ScrollView, TouchableOpacity, TextInput, 
+  StyleSheet, ActivityIndicator, Alert, RefreshControl 
+} from 'react-native';
 
 import { ScreenContainer } from '../components/screen-container';
 import { useColors } from '../hooks/use-colors';
 import { supabase } from '../supabase';
 import { useApp } from '../app-context';
-
-// Interface alignée sur ton script SQL
-interface StockItem {
-  id: number; // SERIAL dans ton SQL
-  nom: string;
-  quantite: number;
-  unite: string;
-  seuil_alerte: number;
-  categorie: string;
-}
+import { refreshAppData } from '../services/data-service';
+import { StockItem } from '../types'; // Utilisation du type centralisé
 
 export default function StockScreen() {
   const colors = useColors();
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
+  
   const [searchQuery, setSearchQuery] = useState('');
-  const [stockItems, setStockItems] = useState<StockItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // Seuls admin, manager et chef peuvent modifier
   const userRole = state?.user?.role || '';
   const canEdit = ['admin', 'manager', 'chef'].includes(userRole.toLowerCase());
 
+  // On utilise les données du state global
+  const stockItems = state.stockItems || [];
+
   useEffect(() => {
-    fetchStock();
+    loadData();
   }, []);
 
-  const fetchStock = async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('stock')
-        .select('*')
-        .order('nom', { ascending: true });
-
-      if (error) throw error;
-      setStockItems(data || []);
-    } catch (error: any) {
-      Alert.alert("Erreur Base de données", error.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  const loadData = async () => {
+    setLoading(true);
+    await refreshAppData(dispatch);
+    setLoading(false);
   };
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    fetchStock();
+    await refreshAppData(dispatch);
+    setRefreshing(false);
   };
 
-  const handleUpdateQuantity = async (id: number, newQty: number) => {
+  const handleUpdateQuantity = async (id: string, newQty: number) => {
     if (!canEdit) return;
 
     const finalQty = Math.max(0, newQty);
-    const previousStock = [...stockItems];
-
-    // Mise à jour optimiste
-    setStockItems(current => 
-      current.map(item => item.id === id ? { ...item, quantite: finalQty } : item)
+    
+    // 1. Mise à jour optimiste dans le state global
+    // On crée une copie des items actuels avec la modif
+    const updatedStocks = stockItems.map(item => 
+      item.id === id ? { ...item, quantity: finalQty } : item
     );
 
+    dispatch({
+      type: 'SET_DATA',
+      payload: { stockItems: updatedStocks }
+    });
+
     try {
+      // 2. Mise à jour Supabase (nom de colonne SQL : quantite)
       const { error } = await supabase
         .from('stock')
         .update({ quantite: finalQty })
-        .eq('id', id);
+        .eq('id', parseInt(id));
 
       if (error) throw error;
     } catch (error: any) {
-      Alert.alert("Erreur sync", "Impossible de mettre à jour le stock.");
-      setStockItems(previousStock);
+      Alert.alert("Erreur sync", "Impossible de mettre à jour le stock en ligne.");
+      // En cas d'erreur, on rafraîchit tout pour annuler la modif optimiste
+      refreshAppData(dispatch);
     }
   };
 
@@ -92,7 +86,7 @@ export default function StockScreen() {
   };
 
   const filteredItems = stockItems.filter(item =>
-    (item.nom || '').toLowerCase().includes(searchQuery.toLowerCase())
+    (item.name || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   if (loading && stockItems.length === 0) {
@@ -136,7 +130,7 @@ export default function StockScreen() {
 
         <View style={styles.listContainer}>
           {filteredItems.map(item => {
-            const status = getStatus(item.quantite, item.seuil_alerte);
+            const status = getStatus(item.quantity, item.minQuantity);
 
             return (
               <View
@@ -149,9 +143,9 @@ export default function StockScreen() {
               >
                 <View style={styles.itemHeader}>
                   <View style={styles.flex1}>
-                    <Text style={[styles.itemName, { color: colors.foreground }]}>{item.nom}</Text>
+                    <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
                     <Text style={[styles.itemQty, { color: status.color }]}>
-                      {item.quantite} {item.unite || 'unité(s)'}
+                      {item.quantity} {item.unit || 'unité(s)'}
                     </Text>
                   </View>
                   <View style={[styles.statusBadge, { backgroundColor: status.color + '15' }]}>
@@ -165,7 +159,7 @@ export default function StockScreen() {
                   <View style={styles.controlsRow}>
                     <TouchableOpacity
                       style={[styles.btnQty, { backgroundColor: colors.border }]}
-                      onPress={() => handleUpdateQuantity(item.id, item.quantite - 1)}
+                      onPress={() => handleUpdateQuantity(item.id, item.quantity - 1)}
                     >
                       <Text style={[styles.btnText, { color: colors.foreground }]}>−</Text>
                     </TouchableOpacity>
@@ -176,14 +170,14 @@ export default function StockScreen() {
                         backgroundColor: colors.background,
                         color: colors.foreground,
                       }]}
-                      value={item.quantite.toString()}
+                      value={item.quantity.toString()}
                       onChangeText={(text) => handleUpdateQuantity(item.id, parseFloat(text) || 0)}
                       keyboardType="numeric"
                     />
 
                     <TouchableOpacity
                       style={[styles.btnQty, { backgroundColor: colors.primary }]}
-                      onPress={() => handleUpdateQuantity(item.id, item.quantite + 1)}
+                      onPress={() => handleUpdateQuantity(item.id, item.quantity + 1)}
                     >
                       <Text style={[styles.btnText, { color: '#fff' }]}>+</Text>
                     </TouchableOpacity>
@@ -191,7 +185,7 @@ export default function StockScreen() {
                 ) : (
                   <View style={styles.readOnlyInfo}>
                     <Text style={{ color: colors.muted, fontSize: 11 }}>
-                      Seuil d'alerte configuré à : {item.seuil_alerte} {item.unite}
+                      Seuil d'alerte configuré à : {item.minQuantity} {item.unit}
                     </Text>
                   </View>
                 )}
@@ -205,7 +199,7 @@ export default function StockScreen() {
           <View style={styles.summaryRow}>
             <Text style={{ color: colors.muted }}>Produits sous le seuil :</Text>
             <Text style={[styles.bold, { color: '#ef4444' }]}>
-              {stockItems.filter(i => i.quantite <= i.seuil_alerte).length}
+              {stockItems.filter(i => i.quantity <= i.minQuantity).length}
             </Text>
           </View>
         </View>
