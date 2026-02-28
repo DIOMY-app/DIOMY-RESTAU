@@ -1,13 +1,13 @@
 /**
  * HomeScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/index.tsx
- * Correction : Intégration de la logique de profil et déconnexion via Modal
+ * Correction : Intégration du changement de mot de passe dans le Modal Profil + Protection Session.
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   ScrollView, Text, View, TouchableOpacity, StyleSheet, 
-  Dimensions, ActivityIndicator, Modal, Alert 
+  Dimensions, ActivityIndicator, Modal, Alert, TextInput 
 } from "react-native";
 import { useRouter } from "expo-router";
 
@@ -15,6 +15,7 @@ import { ScreenContainer } from "../components/screen-container";
 import { useApp } from "../app-context";
 import { useColors } from "../hooks/use-colors";
 import { formatPrice } from "../formatting";
+import { supabase } from "../supabase";
 
 const { width } = Dimensions.get('window');
 
@@ -75,21 +76,31 @@ export default function HomeScreen() {
   const colors = useColors();
   const { state, dispatch } = useApp();
   
-  // État pour la visibilité du profil
   const [isProfileVisible, setIsProfileVisible] = useState(false);
+  
+  // États pour le changement de mot de passe (dans le modal)
+  const [showPwdFields, setShowPwdFields] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  if (!state) {
+  useEffect(() => {
+    if (state && state.user === null) {
+      router.replace('/login');
+    }
+  }, [state?.user]);
+
+  if (!state || !state.user) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
         <ActivityIndicator size="large" color="#8B6F47" />
-        <Text style={{ marginTop: 10, color: '#666' }}>Chargement du système...</Text>
+        <Text style={{ marginTop: 10, color: '#666' }}>Vérification de la session...</Text>
       </View>
     );
   }
 
-  const user = state?.user;
-  const userRole = user?.role || 'staff';
-  const userName = user?.nom || 'Équipe O\'PIED';
+  const user = state.user;
+  const userRole = user.role;
+  const userName = user.nom;
 
   const filteredActions = QUICK_ACTIONS.filter(action => 
     action.allowedRoles.includes(userRole)
@@ -98,9 +109,29 @@ export default function HomeScreen() {
   const todayOrders = state?.orders || [];
   const dailyTotal = todayOrders.reduce((acc: number, curr: any) => acc + (Number(curr.total) || 0), 0);
 
-  const handleQuickAction = (route: string) => {
-    // @ts-ignore
-    router.push(`/${route}`);
+  const handleUpdatePassword = async () => {
+    if (newPassword.length < 4) {
+      Alert.alert("Erreur", "Le mot de passe doit faire au moins 4 caractères.");
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('employes')
+        .update({ password: newPassword })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      Alert.alert("Succès", "Mot de passe mis à jour avec succès.");
+      setNewPassword('');
+      setShowPwdFields(false);
+    } catch (err) {
+      Alert.alert("Erreur", "Impossible de mettre à jour le mot de passe.");
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const handleLogout = () => {
@@ -115,7 +146,6 @@ export default function HomeScreen() {
           onPress: () => {
             setIsProfileVisible(false);
             dispatch({ type: 'SET_USER', payload: null });
-            router.replace('/login');
           } 
         }
       ]
@@ -132,7 +162,6 @@ export default function HomeScreen() {
       >
         <View style={styles.gap6}>
           
-          {/* HEADER AVEC ACTION PROFIL */}
           <View style={styles.headerRow}>
             <View>
               <Text style={[styles.title, { color: colors.foreground }]}>O'PIED DU MONT</Text>
@@ -147,13 +176,12 @@ export default function HomeScreen() {
             </View>
             <TouchableOpacity 
               style={[styles.avatarCircle, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={() => setIsProfileVisible(true)} // Ouvre la modale au lieu de naviguer
+              onPress={() => setIsProfileVisible(true)}
             >
               <Text style={{ fontSize: 20 }}>👤</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Section Statistiques */}
           {['admin', 'manager', 'cashier', 'staff', 'waiter'].includes(userRole) && (
             <View style={styles.statsRow}>
               <View style={[styles.statBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -167,7 +195,6 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* Grille des Services */}
           <View>
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Services</Text>
             <View style={styles.actionGrid}>
@@ -175,7 +202,7 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   key={action.id}
                   style={[styles.actionCard, { backgroundColor: action.color }]}
-                  onPress={() => handleQuickAction(action.route)}
+                  onPress={() => router.push(`/${action.route}` as any)}
                   activeOpacity={0.8}
                 >
                   <View style={styles.iconCircle}>
@@ -187,7 +214,6 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          {/* Ventes Récentes */}
           {recentOrders.length > 0 && (
             <View>
               <View style={[styles.rowBetween, { marginBottom: 12 }]}>
@@ -234,13 +260,13 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      {/* MODAL DE PROFIL (La logique qui manquait) */}
+      {/* MODAL PROFIL AMÉLIORÉ */}
       <Modal visible={isProfileVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: colors.foreground }]}>Mon Compte</Text>
-              <TouchableOpacity onPress={() => setIsProfileVisible(false)}>
+              <TouchableOpacity onPress={() => { setIsProfileVisible(false); setShowPwdFields(false); }}>
                 <Text style={{ color: colors.muted, fontWeight: '900' }}>FERMER</Text>
               </TouchableOpacity>
             </View>
@@ -258,6 +284,37 @@ export default function HomeScreen() {
                 <Text style={styles.infoLabel}>RÔLE</Text>
                 <Text style={[styles.infoVal, { color: colors.primary }]}>{userRole.toUpperCase()}</Text>
               </View>
+            </View>
+
+            {/* SECTION SÉCURITÉ / MOT DE PASSE */}
+            <View style={{ marginBottom: 20 }}>
+                <TouchableOpacity 
+                    onPress={() => setShowPwdFields(!showPwdFields)}
+                    style={[styles.pwdToggle, { borderColor: colors.border }]}
+                >
+                    <Text style={{ color: colors.foreground, fontWeight: '700' }}>Modifier mon mot de passe</Text>
+                    <Text style={{ color: colors.primary }}>{showPwdFields ? '▲' : '▼'}</Text>
+                </TouchableOpacity>
+
+                {showPwdFields && (
+                    <View style={{ marginTop: 10, gap: 10 }}>
+                        <TextInput 
+                            style={[styles.input, { borderColor: colors.border, color: colors.foreground }]}
+                            placeholder="Nouveau mot de passe"
+                            placeholderTextColor={colors.muted}
+                            secureTextEntry
+                            value={newPassword}
+                            onChangeText={setNewPassword}
+                        />
+                        <TouchableOpacity 
+                            style={[styles.updateBtn, { backgroundColor: colors.primary }]}
+                            onPress={handleUpdatePassword}
+                            disabled={isUpdating}
+                        >
+                            {isUpdating ? <ActivityIndicator color="white" /> : <Text style={styles.updateBtnText}>VALIDER LE CHANGEMENT</Text>}
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
 
             <TouchableOpacity 
@@ -304,8 +361,6 @@ const styles = StyleSheet.create({
   ordersContainer: { borderRadius: 24, borderWidth: 1.5, overflow: 'hidden' },
   orderRow: { padding: 20 },
   statusPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
-  
-  // Styles pour la Modal de Profil
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   modalContent: { borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 30, paddingBottom: 50 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
@@ -314,10 +369,14 @@ const styles = StyleSheet.create({
   avatarLarge: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
   avatarTextLarge: { color: 'white', fontSize: 32, fontWeight: '900' },
   profileName: { fontSize: 24, fontWeight: '900', marginBottom: 5 },
-  infoCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 30 },
+  infoCard: { borderRadius: 20, padding: 20, borderWidth: 1, marginBottom: 20 },
   infoItem: { alignItems: 'center' },
   infoLabel: { fontSize: 10, fontWeight: '900', color: '#94a3b8', marginBottom: 5 },
   infoVal: { fontSize: 16, fontWeight: '900' },
+  pwdToggle: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, borderRadius: 15, borderWidth: 1, borderStyle: 'dashed' },
+  input: { borderWidth: 1.5, borderRadius: 12, padding: 12, fontSize: 14 },
+  updateBtn: { paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  updateBtnText: { color: 'white', fontWeight: '900', fontSize: 12 },
   logoutBtn: { backgroundColor: '#fee2e2', paddingVertical: 18, borderRadius: 20, alignItems: 'center' },
   logoutBtnText: { color: '#ef4444', fontWeight: '900', fontSize: 15, letterSpacing: 1 }
 });

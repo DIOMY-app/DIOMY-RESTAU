@@ -1,14 +1,14 @@
 /**
  * CaisseScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/caisse.tsx
- * Correction : Résolution des erreurs de types TS (Retour aux propriétés définies dans types.ts)
+ * Mise à jour : Liaison Transactions <-> Clients pour statistiques avancées
  */
 
 import React, { useState, useEffect } from 'react';
 import { 
   View, Text, ScrollView, TouchableOpacity, FlatList, 
-  Alert, StyleSheet, ActivityIndicator, RefreshControl, 
-  Linking, Image 
+  Alert, StyleSheet, ActivityIndicator, 
+  Linking, Image, TextInput 
 } from 'react-native';
 
 import { useApp } from '../app-context';
@@ -23,7 +23,6 @@ const RESTAURANT_INFO = {
   name: "O'PIED DU MONT",
   location: "Korhogo, Quartier Résidentiel",
   phone: "+225 07 07 00 00 00",
-  whatsapp: "2250707000000",
 };
 
 type PaymentMethod = 'especes' | 'wave' | 'orange_money' | 'carte';
@@ -36,17 +35,16 @@ export default function CaisseScreen() {
   const [isPinVisible, setIsPinVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('Tous');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('especes');
+  
+  // État pour la capture marketing du client
+  const [clientPhone, setClientPhone] = useState('');
 
   useEffect(() => {
     refreshAppData(dispatch);
   }, []);
 
-  const onRefresh = () => refreshAppData(dispatch);
-
-  // Correction Erreur : Utilisation de 'name' (type Category)
   const categories = ['Tous', ...state.categories.map(c => c.name)];
   
-  // Correction Erreur : Utilisation de 'category' (type MenuItem)
   const filteredItems = state.menuItems.filter(item => {
     return selectedCategory === 'Tous' || item.category === selectedCategory;
   });
@@ -59,8 +57,8 @@ export default function CaisseScreen() {
       payload: {
         id: `${item.id}-${Date.now()}`,
         menuItemId: item.id,
-        name: item.name, // Utilisation de 'name'
-        price: item.price, // Utilisation de 'price'
+        name: item.name,
+        price: item.price,
         quantity: 1,
       },
     });
@@ -68,20 +66,19 @@ export default function CaisseScreen() {
 
   const handleUpdateQuantity = (itemId: string, quantity: number) => {
     if (quantity > 0) {
-      // Correction Erreur : Utilisation de 'quantite' (selon ton dispatch action)
       dispatch({ type: 'UPDATE_CART_ITEM', payload: { id: itemId, quantite: quantity } });
     } else {
       dispatch({ type: 'REMOVE_FROM_CART', payload: itemId });
     }
   };
 
-  const sendWhatsAppReceipt = (transactionId: string) => {
+  const sendWhatsAppReceipt = (transactionId: string, phone: string) => {
     const dateStr = new Date().toLocaleString('fr-FR');
-    let message = `*🏔️ O'PIED DU MONT 🍴*\n_Korhogo_\n`;
+    let message = `*🏔️ O'PIED DU MONT 🍴*\n_L'excellence à Korhogo_\n`;
     message += `--------------------------\n`;
     message += `*REÇU #${transactionId.toString().slice(-6).toUpperCase()}*\n`;
     message += `📅 ${dateStr}\n`;
-    message += `💳 ${paymentMethod.toUpperCase()}\n`;
+    message += `💳 PAIEMENT : ${paymentMethod.toUpperCase()}\n`;
     message += `--------------------------\n\n`;
 
     state.cart.forEach(item => {
@@ -90,9 +87,13 @@ export default function CaisseScreen() {
 
     message += `\n*TOTAL : ${formatPrice(cartTotal)}*\n`;
     message += `--------------------------\n`;
-    message += `Merci de votre confiance !`;
+    message += `Merci de votre confiance ! À bientôt.`;
 
-    const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
+    const cleanPhone = phone.replace(/\s/g, '');
+    const url = cleanPhone.length >= 8 
+      ? `whatsapp://send?phone=225${cleanPhone}&text=${encodeURIComponent(message)}`
+      : `whatsapp://send?text=${encodeURIComponent(message)}`;
+
     Linking.canOpenURL(url).then(supp => {
       if (supp) Linking.openURL(url);
       else Alert.alert("Erreur", "WhatsApp n'est pas installé.");
@@ -104,14 +105,35 @@ export default function CaisseScreen() {
     setIsSubmitting(true);
     
     try {
-      // Pour Supabase, on crée un objet compatible avec tes colonnes SQL
       const itemsForSql = state.cart.map(item => ({
         nom: item.name,
         quantite: item.quantity,
         prix_unitaire: item.price
       }));
 
-      // 1. Enregistrement de la transaction
+      let linkedClientId = null;
+
+      // 1. LOGIQUE MARKETING & RÉCUPÉRATION ID CLIENT
+      if (clientPhone.trim().length >= 8) {
+        const cleanPhone = clientPhone.replace(/\s/g, '');
+        
+        // On récupère l'ID du client (nouveau ou existant grâce au téléphone UNIQUE)
+        const { data: clientData, error: clientError } = await supabase
+          .from('clients')
+          .upsert({ 
+            telephone: cleanPhone, 
+            derniere_visite: new Date().toISOString(),
+            nom: 'Client Passager' // Valeur par défaut si nouveau
+          }, { onConflict: 'telephone' })
+          .select('id')
+          .single();
+
+        if (!clientError && clientData) {
+          linkedClientId = clientData.id;
+        }
+      }
+
+      // 2. ENREGISTREMENT DE LA TRANSACTION LIÉE
       const { data: transactionData, error: transactionError } = await supabase
         .from('transactions')
         .insert([{
@@ -120,6 +142,8 @@ export default function CaisseScreen() {
           mode_paiement: paymentMethod,
           items: itemsForSql, 
           caissier: employeeName,
+          client_contact: clientPhone, 
+          client_id: linkedClientId, // Liaison SQL
           creee_a: new Date().toISOString(),
           payee_a: new Date().toISOString()
         }])
@@ -127,15 +151,17 @@ export default function CaisseScreen() {
 
       if (transactionError) throw transactionError;
 
-      // 2. Mise à jour des stocks et cuisine 
-      // Note : On passe 'state.cart' car ces services attendent le type 'CartItem'
+      // 3. Mise à jour des stocks et cuisine 
       await Promise.allSettled([
         deductStockFromOrder(state.cart),
         sendToKitchen(transactionData.id, null, state.cart)
       ]);
 
       const tId = transactionData.id;
+      const savedPhone = clientPhone;
+      
       dispatch({ type: 'CLEAR_CART' });
+      setClientPhone('');
       
       Alert.alert(
         'Vente Validée ✅',
@@ -143,7 +169,7 @@ export default function CaisseScreen() {
         [
           { text: 'OK', onPress: () => refreshAppData(dispatch) },
           { text: 'WhatsApp', onPress: () => {
-              sendWhatsAppReceipt(tId);
+              sendWhatsAppReceipt(tId, savedPhone);
               refreshAppData(dispatch);
           }}
         ]
@@ -181,7 +207,7 @@ export default function CaisseScreen() {
             />
             <View>
               <Text style={[styles.title, { color: colors.foreground }]}>{RESTAURANT_INFO.name}</Text>
-              <Text style={{ color: colors.muted, fontSize: 12 }}>Korhogo • Caisse</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>Korhogo • Caisse Mobile</Text>
             </View>
           </View>
           
@@ -196,10 +222,7 @@ export default function CaisseScreen() {
                   }]}
                   onPress={() => setSelectedCategory(cat)}
                 >
-                  <Text style={{ 
-                      color: selectedCategory === cat ? 'white' : colors.foreground, 
-                      fontWeight: '700' 
-                  }}>{cat}</Text>
+                  <Text style={{ color: selectedCategory === cat ? 'white' : colors.foreground, fontWeight: '700' }}>{cat}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -223,9 +246,7 @@ export default function CaisseScreen() {
                 </Text>
               </TouchableOpacity>
             )}
-            ListEmptyComponent={
-              <Text style={[styles.emptyText, { color: colors.muted, marginTop: 40 }]}>Aucun article.</Text>
-            }
+            ListEmptyComponent={<Text style={[styles.emptyText, { color: colors.muted, marginTop: 40 }]}>Aucun article.</Text>}
           />
         </View>
 
@@ -268,6 +289,18 @@ export default function CaisseScreen() {
                 ))
             )}
           </ScrollView>
+
+          <View style={styles.marketingContainer}>
+            <Text style={[styles.marketingLabel, { color: colors.muted }]}>CLIENT (WHATSAPP / MARKETING)</Text>
+            <TextInput
+              style={[styles.phoneInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+              placeholder="Ex: 0708091011"
+              placeholderTextColor={colors.muted}
+              keyboardType="phone-pad"
+              value={clientPhone}
+              onChangeText={setClientPhone}
+            />
+          </View>
 
           <View style={[styles.totalSection, { borderTopColor: colors.border }]}>
             <View style={styles.totalRow}>
@@ -339,6 +372,9 @@ const styles = StyleSheet.create({
   cartItemFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
   quantityControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   qtyBtn: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  marketingContainer: { marginBottom: 15 },
+  marketingLabel: { fontSize: 9, fontWeight: '900', marginBottom: 5 },
+  phoneInput: { height: 45, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 12, fontSize: 16, fontWeight: '700' },
   totalSection: { marginTop: 15, paddingTop: 15, borderTopWidth: 2 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   paymentGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 15 },

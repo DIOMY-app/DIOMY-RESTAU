@@ -1,40 +1,75 @@
 /**
  * useColors Hook - O'PIED DU MONT Mobile
- * Centralise la palette de couleurs du restaurant
+ * Thème : "Earth" (Terre) - Inspiré par la nature et le contexte local de Korhogo
+ * Emplacement : /hooks/use-colors.ts
  */
 
 import { useColorScheme } from 'react-native';
 
 export const Colors = {
   light: {
-    primary: '#0ea5e9',    // Bleu ciel (Identité restaurant)
-    background: '#ffffff', // Fond blanc
-    surface: '#f8fafc',    // Cartes et zones de saisie
-    foreground: '#0f172a', // Texte principal (Noir/Bleu nuit)
-    muted: '#64748b',      // Texte secondaire (Gris)
-    border: '#e2e8f0',     // Bordures
-    success: '#22c55e',    // Validation / Stock élevé
-    error: '#ef4444',      // Alertes / Stock faible
-    warning: '#f59e0b',    // Attention
+    // Primaire : Ocre/Terre cuite (Rappel de la terre rouge et de l'artisanat local)
+    primary: '#B3541E',    
+    
+    // Background : Crème/Sable (Plus doux que le blanc pur, inspiré par la nature)
+    background: '#FAF7F2', 
+    
+    // Surface : Papier/Parchemin léger
+    surface: '#FFFFFF',    
+    
+    // Foreground : Brun très sombre/Anthracite (Plus naturel que le noir pur)
+    foreground: '#2D241E', 
+    
+    // Muted : Brun grisâtre (Pour le texte secondaire)
+    muted: '#8C7E74',      
+    
+    // Border : Argile claire
+    border: '#E8E2D9',     
+    
+    // Success : Vert Savane/Forêt (Adaptation spécifique au contexte )
+    success: '#3A5A40',    
+    
+    // Error : Rouge brique intense
+    error: '#A4161A',      
+    
+    // Warning : Jaune Safran/Maïs
+    warning: '#D97706',    
   },
   dark: {
-    primary: '#38bdf8',
-    background: '#0f172a',
-    surface: '#1e293b',
-    foreground: '#f8fafc',
-    muted: '#94a3b8',
-    border: '#334155',
-    success: '#4ade80',
-    error: '#f87171',
-    warning: '#fbbf24',
+    // Version sombre adaptée (Terre de Sienne profonde)
+    primary: '#D9773E',
+    
+    // Fond : Nuit de savane (Bleu-Noir très chaud)
+    background: '#1A1614',
+    
+    // Surface : Roche volcanique
+    surface: '#26211E',
+    
+    // Texte : Sable clair
+    foreground: '#F5EEE6',
+    
+    // Texte secondaire : Terre séchée
+    muted: '#A69689',
+    
+    // Bordure : Écorce sombre
+    border: '#3D352F',
+    
+    // Success : Vert émeraude sombre
+    success: '#588157',
+    
+    // Error : Corail brûlé
+    error: '#E5383B',
+    
+    // Warning : Or ancien
+    warning: '#F59E0B',
   },
 };
 
 export function useColors() {
   const colorScheme = useColorScheme();
   
-  // On récupère le thème système (light ou dark)
-  // Par défaut, on utilise le thème clair si non détecté
+  // Utilise le thème système (light ou dark)
+  // Par défaut : light (Thème Terre clair)
   const theme = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
   return theme;

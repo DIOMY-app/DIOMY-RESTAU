@@ -1,7 +1,7 @@
 /**
  * Stock Management Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/stocks.tsx
- * Correction : Harmonisation avec types.ts et mise à jour du State Global
+ * Amélioration : Alertes critiques visuelles et filtres rapides
  */
 
 import React, { useState, useEffect } from 'react';
@@ -15,21 +15,19 @@ import { useColors } from '../hooks/use-colors';
 import { supabase } from '../supabase';
 import { useApp } from '../app-context';
 import { refreshAppData } from '../services/data-service';
-import { StockItem } from '../types'; // Utilisation du type centralisé
+import { StockItem } from '../types';
 
 export default function StockScreen() {
   const colors = useColors();
   const { state, dispatch } = useApp();
   
   const [searchQuery, setSearchQuery] = useState('');
+  const [showOnlyAlerts, setShowOnlyAlerts] = useState(false); // Nouveau filtre
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Seuls admin, manager et chef peuvent modifier
   const userRole = state?.user?.role || '';
   const canEdit = ['admin', 'manager', 'chef'].includes(userRole.toLowerCase());
-
-  // On utilise les données du state global
   const stockItems = state.stockItems || [];
 
   useEffect(() => {
@@ -50,11 +48,9 @@ export default function StockScreen() {
 
   const handleUpdateQuantity = async (id: string, newQty: number) => {
     if (!canEdit) return;
-
     const finalQty = Math.max(0, newQty);
     
-    // 1. Mise à jour optimiste dans le state global
-    // On crée une copie des items actuels avec la modif
+    // Mise à jour optimiste
     const updatedStocks = stockItems.map(item => 
       item.id === id ? { ...item, quantity: finalQty } : item
     );
@@ -65,7 +61,6 @@ export default function StockScreen() {
     });
 
     try {
-      // 2. Mise à jour Supabase (nom de colonne SQL : quantite)
       const { error } = await supabase
         .from('stock')
         .update({ quantite: finalQty })
@@ -74,20 +69,24 @@ export default function StockScreen() {
       if (error) throw error;
     } catch (error: any) {
       Alert.alert("Erreur sync", "Impossible de mettre à jour le stock en ligne.");
-      // En cas d'erreur, on rafraîchit tout pour annuler la modif optimiste
       refreshAppData(dispatch);
     }
   };
 
   const getStatus = (q: number, seuil: number) => {
-    if (q <= 0) return { label: 'RUPTURE', color: '#ef4444' };
-    if (q <= seuil) return { label: 'CRITIQUE', color: '#f59e0b' };
-    return { label: 'DISPONIBLE', color: '#22c55e' };
+    if (q <= 0) return { label: 'RUPTURE', color: '#ef4444', level: 2 };
+    if (q <= seuil) return { label: 'CRITIQUE', color: '#f59e0b', level: 1 };
+    return { label: 'DISPONIBLE', color: '#22c55e', level: 0 };
   };
 
-  const filteredItems = stockItems.filter(item =>
-    (item.name || '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Logique de filtrage combinée
+  const filteredItems = stockItems.filter(item => {
+    const matchesSearch = (item.name || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const isAlert = item.quantity <= item.minQuantity;
+    return showOnlyAlerts ? (matchesSearch && isAlert) : matchesSearch;
+  });
+
+  const alertCount = stockItems.filter(i => i.quantity <= i.minQuantity).length;
 
   if (loading && stockItems.length === 0) {
     return (
@@ -108,13 +107,31 @@ export default function StockScreen() {
         }
       >
         <View style={styles.headerSection}>
-          <Text style={[styles.title, { color: colors.foreground }]}>Stocks</Text>
+          <View>
+            <Text style={[styles.title, { color: colors.foreground }]}>Stocks</Text>
+            <Text style={{ color: colors.muted, fontSize: 13 }}>Suivi des ingrédients à Korhogo</Text>
+          </View>
           <View style={[styles.roleBadge, { backgroundColor: canEdit ? colors.primary + '20' : colors.border }]}>
             <Text style={[styles.roleText, { color: canEdit ? colors.primary : colors.muted }]}>
               {canEdit ? "🛠️ GESTION" : "👁️ LECTURE"}
             </Text>
           </View>
         </View>
+
+        {/* BANDEAU D'ALERTE DYNAMIQUE */}
+        {alertCount > 0 && (
+          <TouchableOpacity 
+            onPress={() => setShowOnlyAlerts(!showOnlyAlerts)}
+            style={[styles.alertBanner, { backgroundColor: showOnlyAlerts ? '#ef4444' : '#fef2f2', borderColor: '#fee2e2' }]}
+          >
+            <Text style={[styles.alertBannerText, { color: showOnlyAlerts ? '#fff' : '#ef4444' }]}>
+              ⚠️ {alertCount} produit{alertCount > 1 ? 's sont' : ' est'} en seuil critique !
+            </Text>
+            <Text style={[styles.alertBannerSub, { color: showOnlyAlerts ? '#fff' : '#ef4444' }]}>
+              {showOnlyAlerts ? "Voir tout le stock" : "Filtrer les alertes"}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <TextInput
           style={[styles.searchInput, {
@@ -144,9 +161,14 @@ export default function StockScreen() {
                 <View style={styles.itemHeader}>
                   <View style={styles.flex1}>
                     <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
-                    <Text style={[styles.itemQty, { color: status.color }]}>
-                      {item.quantity} {item.unit || 'unité(s)'}
-                    </Text>
+                    <View style={styles.qtyRow}>
+                      <Text style={[styles.itemQty, { color: status.color }]}>
+                        {item.quantity} {item.unit || 'unité(s)'}
+                      </Text>
+                      <Text style={{ color: colors.muted, fontSize: 12, marginLeft: 8 }}>
+                        (Seuil: {item.minQuantity})
+                      </Text>
+                    </View>
                   </View>
                   <View style={[styles.statusBadge, { backgroundColor: status.color + '15' }]}>
                     <Text style={[styles.statusBadgeText, { color: status.color }]}>
@@ -155,7 +177,7 @@ export default function StockScreen() {
                   </View>
                 </View>
 
-                {canEdit ? (
+                {canEdit && (
                   <View style={styles.controlsRow}>
                     <TouchableOpacity
                       style={[styles.btnQty, { backgroundColor: colors.border }]}
@@ -182,27 +204,19 @@ export default function StockScreen() {
                       <Text style={[styles.btnText, { color: '#fff' }]}>+</Text>
                     </TouchableOpacity>
                   </View>
-                ) : (
-                  <View style={styles.readOnlyInfo}>
-                    <Text style={{ color: colors.muted, fontSize: 11 }}>
-                      Seuil d'alerte configuré à : {item.minQuantity} {item.unit}
-                    </Text>
-                  </View>
                 )}
               </View>
             );
           })}
         </View>
 
-        <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.summaryTitle, { color: colors.foreground }]}>Alertes Stock</Text>
-          <View style={styles.summaryRow}>
-            <Text style={{ color: colors.muted }}>Produits sous le seuil :</Text>
-            <Text style={[styles.bold, { color: '#ef4444' }]}>
-              {stockItems.filter(i => i.quantity <= i.minQuantity).length}
-            </Text>
+        {filteredItems.length === 0 && (
+          <View style={styles.emptyState}>
+            <Text style={{ color: colors.muted }}>Aucun produit trouvé.</Text>
           </View>
-        </View>
+        )}
+
+        <View style={{ height: 40 }} />
       </ScrollView>
     </ScreenContainer>
   );
@@ -216,21 +230,21 @@ const styles = StyleSheet.create({
   title: { fontSize: 32, fontWeight: '900' },
   roleBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
   roleText: { fontSize: 10, fontWeight: '800' },
+  alertBanner: { padding: 16, borderRadius: 18, borderWidth: 1, marginBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  alertBannerText: { fontWeight: '800', fontSize: 14 },
+  alertBannerSub: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
   searchInput: { borderWidth: 1.5, borderRadius: 15, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, marginBottom: 20 },
   listContainer: { gap: 12 },
   itemCard: { borderRadius: 18, padding: 16, borderLeftWidth: 6, borderWidth: 1 },
   itemHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   itemName: { fontSize: 18, fontWeight: '800' },
+  qtyRow: { flexDirection: 'row', alignItems: 'baseline' },
   itemQty: { fontSize: 16, fontWeight: '700', marginTop: 2 },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignSelf: 'flex-start' },
   statusBadgeText: { fontSize: 10, fontWeight: '900' },
   controlsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  readOnlyInfo: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
   btnQty: { width: 45, height: 45, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   btnText: { fontSize: 20, fontWeight: 'bold' },
   qtyInput: { flex: 1, borderWidth: 1.5, borderRadius: 12, height: 45, textAlign: 'center', fontSize: 18, fontWeight: '800' },
-  summaryCard: { borderRadius: 18, padding: 20, borderWidth: 1, marginTop: 20 },
-  summaryTitle: { fontSize: 16, fontWeight: '800', marginBottom: 8 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  bold: { fontWeight: '900', fontSize: 20 }
+  emptyState: { padding: 40, alignItems: 'center' }
 });

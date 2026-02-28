@@ -1,7 +1,7 @@
 /**
  * Employees Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/employees.tsx
- * Gestion complète : Liste, Filtrage, Activation et Ajout
+ * Version : Thème Earth & Harmonisation de l'équipe
  */
 
 import React, { useState } from 'react';
@@ -63,13 +63,13 @@ export default function EmployeesScreen() {
           nom: newEmpName,
           telephone: newEmpPhone.replace(/\s/g, ''),
           role: newEmpRole,
-          password: 'password123', // Mot de passe par défaut pour la première connexion
+          password: 'password123', // Mot de passe par défaut
           est_actif: true
         }]);
 
       if (error) throw error;
 
-      Alert.alert("Succès", `${newEmpName} a été ajouté. Le mot de passe par défaut est : password123`);
+      Alert.alert("Succès", `${newEmpName} a été ajouté. Mot de passe : password123`);
       setModalVisible(false);
       setNewEmpName('');
       setNewEmpPhone('');
@@ -104,7 +104,7 @@ export default function EmployeesScreen() {
 
     Alert.alert(
       "Confirmation",
-      `Supprimer définitivement ${nom} ? Cette action est irréversible.`,
+      `Supprimer définitivement ${nom} ?`,
       [
         { text: "Annuler", style: "cancel" },
         { 
@@ -124,7 +124,7 @@ export default function EmployeesScreen() {
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.headerSection}>
           <Text style={[styles.title, { color: colors.foreground }]}>Équipe</Text>
-          <Text style={[styles.subtitle, { color: colors.muted }]}>Gérer les accès du personnel</Text>
+          <Text style={[styles.subtitle, { color: colors.muted }]}>O'PIED DU MONT - Gestion du personnel</Text>
           
           <TextInput
             style={[styles.searchInput, { 
@@ -132,7 +132,7 @@ export default function EmployeesScreen() {
               backgroundColor: colors.surface, 
               color: colors.foreground 
             }]}
-            placeholder="Rechercher par nom..."
+            placeholder="Rechercher un membre..."
             placeholderTextColor={colors.muted}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -149,8 +149,8 @@ export default function EmployeesScreen() {
                 onPress={() => setFilterStatus(status)}
               >
                 <Text style={{ 
-                  color: filterStatus === status ? '#fff' : colors.muted, 
-                  fontSize: 11, 
+                  color: filterStatus === status ? 'white' : colors.muted, 
+                  fontSize: 10, 
                   fontWeight: '900' 
                 }}>
                   {status === 'all' ? 'TOUS' : status === 'active' ? 'ACTIFS' : 'INACTIFS'}
@@ -164,15 +164,15 @@ export default function EmployeesScreen() {
           {filteredEmployees.map((emp: any) => (
             <View key={emp.id} style={[styles.empCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <View style={styles.cardHeader}>
-                <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarText}>{emp.nom.substring(0, 1).toUpperCase()}</Text>
+                <View style={[styles.avatarPlaceholder, { backgroundColor: colors.background }]}>
+                  <Text style={[styles.avatarText, { color: colors.primary }]}>{emp.nom.substring(0, 1).toUpperCase()}</Text>
                 </View>
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={[styles.empName, { color: colors.foreground }]}>{emp.nom}</Text>
                   <Text style={{ color: colors.muted, fontSize: 13 }}>{emp.telephone}</Text>
                 </View>
                 {canManage && (
-                  <TouchableOpacity onPress={() => handleDeleteEmployee(emp.id, emp.nom)} style={styles.deleteBtn}>
+                  <TouchableOpacity onPress={() => handleDeleteEmployee(emp.id, emp.nom)} style={[styles.deleteBtn, { backgroundColor: colors.error + '20' }]}>
                     <Text style={{ fontSize: 16 }}>🗑️</Text>
                   </TouchableOpacity>
                 )}
@@ -186,12 +186,12 @@ export default function EmployeesScreen() {
                 </View>
                 
                 <TouchableOpacity
-                  style={[styles.statusBadge, { backgroundColor: emp.est_actif ? '#22c55e20' : '#ef444420' }]}
+                  style={[styles.statusBadge, { backgroundColor: emp.est_actif ? colors.success + '20' : colors.error + '20' }]}
                   onPress={() => handleToggleStatus(emp.id, emp.est_actif)}
                   disabled={!canManage}
                 >
-                  <View style={[styles.dot, { backgroundColor: emp.est_actif ? '#22c55e' : '#ef4444' }]} />
-                  <Text style={{ color: emp.est_actif ? '#22c55e' : '#ef4444', fontSize: 11, fontWeight: '800' }}>
+                  <View style={[styles.dot, { backgroundColor: emp.est_actif ? colors.success : colors.error }]} />
+                  <Text style={{ color: emp.est_actif ? colors.success : colors.error, fontSize: 11, fontWeight: '800' }}>
                     {emp.est_actif ? 'Actif' : 'Désactivé'}
                   </Text>
                 </TouchableOpacity>
@@ -201,7 +201,7 @@ export default function EmployeesScreen() {
           
           {filteredEmployees.length === 0 && (
             <View style={styles.emptyView}>
-              <Text style={{ color: colors.muted, fontWeight: '600' }}>Aucun membre ne correspond.</Text>
+              <Text style={{ color: colors.muted, fontWeight: '600' }}>Aucun collaborateur trouvé.</Text>
             </View>
           )}
         </View>
@@ -214,7 +214,7 @@ export default function EmployeesScreen() {
           style={[styles.floatingAddBtn, { backgroundColor: colors.primary }]}
           onPress={() => setModalVisible(true)}
         >
-          <Text style={styles.addBtnText}>+ AJOUTER</Text>
+          <Text style={styles.addBtnText}>+ NOUVEAU MEMBRE</Text>
         </TouchableOpacity>
       )}
 
@@ -223,25 +223,25 @@ export default function EmployeesScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: colors.foreground }]}>Nouveau collaborateur</Text>
+                <Text style={[styles.modalTitle, { color: colors.foreground }]}>Ajouter à l'Équipe</Text>
                 <TouchableOpacity onPress={() => setModalVisible(false)}>
-                    <Text style={{ color: colors.muted, fontWeight: '900' }}>FERMER</Text>
+                    <Text style={{ color: colors.primary, fontWeight: '900' }}>ANNULER</Text>
                 </TouchableOpacity>
             </View>
             
             <Text style={styles.modalLabel}>NOM COMPLET</Text>
             <TextInput
               style={[styles.modalInput, { borderColor: colors.border, color: colors.foreground }]}
-              placeholder="Ex: Jean Marc Kouassi"
+              placeholder="Ex: Kouassi Konan"
               placeholderTextColor={colors.muted}
               value={newEmpName}
               onChangeText={setNewEmpName}
             />
 
-            <Text style={styles.modalLabel}>TÉLÉPHONE</Text>
+            <Text style={styles.modalLabel}>N° TÉLÉPHONE</Text>
             <TextInput
               style={[styles.modalInput, { borderColor: colors.border, color: colors.foreground }]}
-              placeholder="0708091011"
+              placeholder="0700000000"
               placeholderTextColor={colors.muted}
               keyboardType="phone-pad"
               maxLength={10}
@@ -249,7 +249,7 @@ export default function EmployeesScreen() {
               onChangeText={setNewEmpPhone}
             />
 
-            <Text style={styles.modalLabel}>RÔLE DANS LE RESTAURANT</Text>
+            <Text style={styles.modalLabel}>RÔLE ATTRIBUÉ</Text>
             <View style={styles.roleSelector}>
               {(['waiter', 'cashier', 'chef', 'manager', 'staff'] as Role[]).map(r => (
                 <TouchableOpacity
@@ -257,12 +257,12 @@ export default function EmployeesScreen() {
                   onPress={() => setNewEmpRole(r)}
                   style={[styles.roleOption, { 
                     borderColor: newEmpRole === r ? colors.primary : colors.border,
-                    backgroundColor: newEmpRole === r ? colors.primary + '10' : 'transparent'
+                    backgroundColor: newEmpRole === r ? colors.primary + '15' : 'transparent'
                   }]}
                 >
                   <Text style={{ 
                     color: newEmpRole === r ? colors.primary : colors.muted, 
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: '900'
                   }}>
                     {formatRole(r).toUpperCase()}
@@ -276,7 +276,7 @@ export default function EmployeesScreen() {
               onPress={handleAddEmployee}
               disabled={isActionLoading}
             >
-              {isActionLoading ? <ActivityIndicator color="white" /> : <Text style={styles.saveBtnText}>ENREGISTRER LE MEMBRE</Text>}
+              {isActionLoading ? <ActivityIndicator color="white" /> : <Text style={styles.saveBtnText}>ENREGISTRER</Text>}
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -288,33 +288,33 @@ export default function EmployeesScreen() {
 const styles = StyleSheet.create({
   container: { padding: 20 },
   headerSection: { marginBottom: 25 },
-  title: { fontSize: 34, fontWeight: '900', letterSpacing: -1 },
-  subtitle: { fontSize: 15, fontWeight: '600', marginBottom: 20 },
+  title: { fontSize: 32, fontWeight: '900', letterSpacing: -1 },
+  subtitle: { fontSize: 14, fontWeight: '600', marginBottom: 20, opacity: 0.7 },
   searchInput: { borderWidth: 1.5, borderRadius: 16, padding: 16, marginBottom: 15, fontSize: 16 },
   filterRow: { flexDirection: 'row', gap: 8 },
   filterTab: { flex: 1, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, alignItems: 'center' },
   listSection: { gap: 12 },
-  empCard: { borderRadius: 20, padding: 16, borderWidth: 1, elevation: 1 },
+  empCard: { borderRadius: 24, padding: 16, borderWidth: 1 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
-  avatarPlaceholder: { width: 45, height: 45, borderRadius: 22, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontWeight: '900', color: '#64748b', fontSize: 18 },
+  avatarPlaceholder: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontWeight: '900', fontSize: 20 },
   empName: { fontSize: 17, fontWeight: '800' },
-  deleteBtn: { padding: 8, backgroundColor: '#fee2e2', borderRadius: 10 },
+  deleteBtn: { padding: 8, borderRadius: 12 },
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   roleBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
   statusBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, gap: 6 },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  floatingAddBtn: { position: 'absolute', bottom: 30, right: 20, left: 20, paddingVertical: 18, borderRadius: 20, elevation: 5, alignItems: 'center' },
-  addBtnText: { color: '#fff', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+  floatingAddBtn: { position: 'absolute', bottom: 30, right: 20, left: 20, paddingVertical: 18, borderRadius: 22, elevation: 4, alignItems: 'center' },
+  addBtnText: { color: '#fff', fontWeight: '900', fontSize: 15, letterSpacing: 1 },
   emptyView: { alignItems: 'center', padding: 50 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalContent: { borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 30, paddingBottom: 50 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  modalContent: { borderTopLeftRadius: 35, borderTopRightRadius: 35, padding: 30, paddingBottom: 50 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
   modalTitle: { fontSize: 22, fontWeight: '900' },
-  modalLabel: { fontSize: 11, fontWeight: '900', color: '#94a3b8', marginBottom: 10, letterSpacing: 1 },
+  modalLabel: { fontSize: 10, fontWeight: '900', color: '#888', marginBottom: 8, letterSpacing: 1 },
   modalInput: { borderWidth: 1.5, borderRadius: 16, padding: 16, marginBottom: 20, fontSize: 16 },
   roleSelector: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 30 },
-  roleOption: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, borderWidth: 2 },
-  saveBtn: { paddingVertical: 18, borderRadius: 18, alignItems: 'center' },
-  saveBtnText: { color: '#fff', fontWeight: '900', fontSize: 15 }
+  roleOption: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 2 },
+  saveBtn: { paddingVertical: 18, borderRadius: 20, alignItems: 'center' },
+  saveBtnText: { color: '#fff', fontWeight: '900', fontSize: 16 }
 });
