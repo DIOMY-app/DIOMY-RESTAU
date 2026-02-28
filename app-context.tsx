@@ -1,12 +1,12 @@
 /**
  * AppContext - Global State Management for O'PIED DU MONT
  * Emplacement : racine (./app-context.tsx)
- * Version stabilisée pour APK
+ * Version finale : Stabilisée avec gestion robuste du panier et des types
  */
 
 import React, { createContext, useReducer, ReactNode, useContext } from 'react';
-// Vérifie que types.ts est bien à la racine avec ce fichier
-import type { AppContextType, User, CartItem, Order } from './types';
+// Import des types depuis la racine
+import type { AppContextType, User, CartItem, Order, MenuItem, Category, StockItem, Employee } from './types';
 
 // ─── TYPES & ACTIONS ──────────────────────────────────────────────────────────
 
@@ -18,8 +18,14 @@ export type AppAction =
   | { type: 'REMOVE_FROM_CART'; payload: string }
   | { type: 'UPDATE_CART_ITEM'; payload: { id: string; quantite: number } }
   | { type: 'CLEAR_CART' }
-  | { type: 'SET_DATA'; payload: Partial<AppContextType> }
+  | { type: 'SET_DATA'; payload: { 
+      categories?: Category[]; 
+      menuItems?: MenuItem[]; 
+      stockItems?: StockItem[]; 
+      employees?: Employee[] 
+    } }
   | { type: 'ADD_ORDER'; payload: Order }
+  | { type: 'INITIALIZE_DATA'; payload: any } // Pour la compatibilité avec refreshAppData
   | { type: 'RESET' };
 
 export const initialState: AppContextType = {
@@ -45,29 +51,31 @@ function appReducer(state: AppContextType, action: AppAction): AppContextType {
   switch (action.type) {
     case 'SET_USER':
       return { ...state, user: action.payload, isLoading: false };
-
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload };
-
     case 'SET_ERROR':
       return { ...state, error: action.payload, isLoading: false };
-
+    
+    // Support pour SET_DATA et INITIALIZE_DATA utilisé dans data-service
     case 'SET_DATA':
+    case 'INITIALIZE_DATA':
       return { ...state, ...action.payload, isLoading: false };
 
     case 'ADD_TO_CART': {
       const currentCart = state.cart || [];
-      const existingItem = currentCart.find((item) => item.menuItemId === action.payload.menuItemId);
-      
-      if (existingItem) {
-        return {
-          ...state,
-          cart: currentCart.map((item) =>
-            item.menuItemId === action.payload.menuItemId
-              ? { ...item, quantity: (item.quantity || 0) + (action.payload.quantity || 1) }
-              : item
-          ),
+      // On vérifie si l'article (menuItemId) est déjà présent
+      const existingItemIndex = currentCart.findIndex(
+        (item) => item.menuItemId === action.payload.menuItemId
+      );
+
+      if (existingItemIndex > -1) {
+        const updatedCart = [...currentCart];
+        const item = updatedCart[existingItemIndex];
+        updatedCart[existingItemIndex] = {
+          ...item,
+          quantity: (item.quantity || 0) + (action.payload.quantity || 1)
         };
+        return { ...state, cart: updatedCart };
       }
       return { ...state, cart: [...currentCart, action.payload] };
     }
@@ -105,9 +113,13 @@ function appReducer(state: AppContextType, action: AppAction): AppContextType {
   }
 }
 
-// ─── PROVIDER ─────────────────────────────────────────────────────────────────
+// ─── PROVIDER ────────────────────────────────────────────────────────────────
 
-export function AppProvider({ children }: { children: ReactNode }) {
+interface AppProviderProps {
+  children: ReactNode;
+}
+
+export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
   return (
@@ -115,14 +127,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       {children}
     </AppContext.Provider>
   );
-}
+};
 
 // ─── HOOKS ────────────────────────────────────────────────────────────────────
 
 export function useApp() {
   const context = useContext(AppContext);
   if (!context) {
-    // Log utile pour débugger l'APK si le provider est manquant dans l'arbre
     console.error('Erreur: useApp utilisé hors du AppProvider');
     throw new Error('useApp must be used within AppProvider');
   }

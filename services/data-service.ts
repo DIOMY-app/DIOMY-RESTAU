@@ -37,7 +37,7 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
     if (stockError) throw stockError;
     if (empError) throw empError;
 
-    // 2. Formatage des Catégories
+    // 2. Formatage des Catégories (aligné sur types.ts)
     const formattedCategories = (categoriesData || []).map(cat => ({
       id: cat.id.toString(),
       name: cat.nom,
@@ -63,20 +63,20 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
       };
     });
 
-    // 4. Formatage des Stocks (pour alertes temps réel)
+    // 4. Formatage des Stocks
     const formattedStocks = (stockData || []).map(s => ({
       id: s.id.toString(),
       name: s.nom,
       quantity: Number(s.quantite),
       unit: s.unite || 'pcs',
       minQuantity: Number(s.seuil_alerte) || 5,
-      maxQuantity: 100, // Valeur par défaut
+      maxQuantity: 100, 
       lastUpdated: s.derniere_mise_a_jour || now,
       createdAt: now,
       updatedAt: now
     }));
 
-    // 5. Formatage des Employés (pour PinPad local)
+    // 5. Formatage des Employés
     const formattedEmployees = (employeesData || []).map(emp => ({
       id: emp.id.toString(),
       nom: emp.nom,
@@ -109,19 +109,18 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
 
 /**
  * LOGIQUE COMPLEXE : Déduit les stocks via la table 'menu_recettes'
- * Utilisé lors de la validation du panier à la caisse.
  */
 export const deductStockFromOrder = async (items: CartItem[]) => {
   try {
     for (const item of items) {
-      // On cherche si l'article possède une recette (ingrédients multiples)
+      // On cherche si l'article possède une recette
       const { data: recette, error: recipeError } = await supabase
         .from('menu_recettes')
         .select('stock_id, quantite_consommee')
         .eq('menu_id', parseInt(item.menuItemId || item.id));
 
       if (!recipeError && recette && recette.length > 0) {
-        // Cas A : Déduction par ingrédients (ex: Crêpe -> Farine, Lait)
+        // Cas A : Déduction par ingrédients
         for (const ingredient of recette) {
           const { data: stockNow } = await supabase
             .from('stock')
@@ -138,7 +137,7 @@ export const deductStockFromOrder = async (items: CartItem[]) => {
           }
         }
       } else {
-        // Cas B : Déduction directe (ex: Canette de Coca)
+        // Cas B : Déduction directe (nom à nom)
         const { data: stockItem } = await supabase
           .from('stock')
           .select('id, quantite')
@@ -162,15 +161,22 @@ export const deductStockFromOrder = async (items: CartItem[]) => {
 
 /**
  * ENVOI EN CUISINE 
+ * Note : On reformate ici pour que l'écran Cuisine reçoive 'nom' et 'quantite' (JSONB)
  */
 export const sendToKitchen = async (transactionId: number, tableNum: number | null, items: CartItem[]) => {
   try {
+    // Formatage pour éviter que l'écran Cuisine affiche du vide
+    const itemsFormatted = items.map(i => ({
+      nom: i.name,
+      quantite: i.quantity
+    }));
+
     const { error } = await supabase
       .from('preparation_cuisine')
       .insert([{
         transaction_id: transactionId,
         table_numero: tableNum,
-        items: items, 
+        items: itemsFormatted, 
         statut: 'en_attente'
       }]);
 

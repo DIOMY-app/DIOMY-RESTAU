@@ -3,7 +3,7 @@
  * Gère l'état global du panier (Règle n°2 & 3)
  */
 
-import React, { createContext, useContext, useState, useMemo } from 'react';
+import React, { createContext, useContext, useState, useMemo, ReactNode } from 'react';
 
 interface CartItem {
   id: string;
@@ -23,7 +23,8 @@ interface CartContextType {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
-export function CartProvider({ children }: { children: React.ReactNode }) {
+// Utilisation du type React.FC pour garantir la reconnaissance des 'children' par TypeScript
+export const CartProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [cart, setCart] = useState<CartItem[]>([]);
 
   const addToCart = (product: any) => {
@@ -59,7 +60,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       {children}
     </CartContext.Provider>
   );
-}
+};
 
 export function useCart() {
   const context = useContext(CartContext);

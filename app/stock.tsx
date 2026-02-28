@@ -1,7 +1,7 @@
 /**
  * Stock Management Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/stocks.tsx
- * Gestion des permissions : Édition pour Admin/Manager/Chef, Lecture seule pour Staff.
+ * Correction : Synchronisation totale avec le schéma SQL (nom, quantite, seuil_alerte)
  */
 
 import React, { useState, useEffect } from 'react';
@@ -12,13 +12,14 @@ import { useColors } from '../hooks/use-colors';
 import { supabase } from '../supabase';
 import { useApp } from '../app-context';
 
+// Interface alignée sur ton script SQL
 interface StockItem {
-  id: string;
-  name: string;
-  quantity: number;
-  unit: string;
-  min_quantity: number;
-  max_quantity: number;
+  id: number; // SERIAL dans ton SQL
+  nom: string;
+  quantite: number;
+  unite: string;
+  seuil_alerte: number;
+  categorie: string;
 }
 
 export default function StockScreen() {
@@ -29,8 +30,9 @@ export default function StockScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Vérification du rôle : Seuls admin, manager et chef peuvent modifier
-  const canEdit = ['admin', 'manager', 'chef'].includes(state.user?.role || '');
+  // Seuls admin, manager et chef peuvent modifier
+  const userRole = state?.user?.role || '';
+  const canEdit = ['admin', 'manager', 'chef'].includes(userRole.toLowerCase());
 
   useEffect(() => {
     fetchStock();
@@ -42,12 +44,12 @@ export default function StockScreen() {
       const { data, error } = await supabase
         .from('stock')
         .select('*')
-        .order('name', { ascending: true });
+        .order('nom', { ascending: true });
 
       if (error) throw error;
       setStockItems(data || []);
     } catch (error: any) {
-      Alert.alert("Erreur", "Impossible de charger le stock : " + error.message);
+      Alert.alert("Erreur Base de données", error.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -59,53 +61,45 @@ export default function StockScreen() {
     fetchStock();
   };
 
-  const handleUpdateQuantity = async (id: string, newQuantity: number) => {
+  const handleUpdateQuantity = async (id: number, newQty: number) => {
     if (!canEdit) return;
 
-    const finalQty = Math.max(0, newQuantity);
-    
-    // Sauvegarde de l'ancien état pour rollback en cas d'erreur
+    const finalQty = Math.max(0, newQty);
     const previousStock = [...stockItems];
 
-    // Mise à jour optimiste de l'UI
+    // Mise à jour optimiste
     setStockItems(current => 
-      current.map(item => item.id === id ? { ...item, quantity: finalQty } : item)
+      current.map(item => item.id === id ? { ...item, quantite: finalQty } : item)
     );
 
     try {
       const { error } = await supabase
         .from('stock')
-        .update({ quantity: finalQty })
+        .update({ quantite: finalQty })
         .eq('id', id);
 
       if (error) throw error;
     } catch (error: any) {
-      Alert.alert("Erreur sync", "Échec de la mise à jour sur le serveur.");
-      setStockItems(previousStock); // Rollback
+      Alert.alert("Erreur sync", "Impossible de mettre à jour le stock.");
+      setStockItems(previousStock);
     }
   };
 
-  const getStockStatus = (q: number, min: number, max: number) => {
-    if (q <= min) return 'low';
-    if (q >= max) return 'high';
-    return 'normal';
-  };
-
-  const getStatusColor = (status: string) => {
-    if (status === 'low') return '#ef4444'; // Rouge
-    if (status === 'high') return '#22c55e'; // Vert
-    return colors.primary; // Orange/Thème
+  const getStatus = (q: number, seuil: number) => {
+    if (q <= 0) return { label: 'RUPTURE', color: '#ef4444' };
+    if (q <= seuil) return { label: 'CRITIQUE', color: '#f59e0b' };
+    return { label: 'DISPONIBLE', color: '#22c55e' };
   };
 
   const filteredItems = stockItems.filter(item =>
-    item.name.toLowerCase().includes(searchQuery.toLowerCase())
+    (item.nom || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   if (loading && stockItems.length === 0) {
     return (
       <ScreenContainer style={styles.centered}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: 10, color: colors.muted }}>Chargement de l'inventaire...</Text>
+        <Text style={{ marginTop: 10, color: colors.muted }}>Accès à l'inventaire...</Text>
       </ScreenContainer>
     );
   }
@@ -120,10 +114,10 @@ export default function StockScreen() {
         }
       >
         <View style={styles.headerSection}>
-          <Text style={[styles.title, { color: colors.foreground }]}>Inventaire</Text>
+          <Text style={[styles.title, { color: colors.foreground }]}>Stocks</Text>
           <View style={[styles.roleBadge, { backgroundColor: canEdit ? colors.primary + '20' : colors.border }]}>
             <Text style={[styles.roleText, { color: canEdit ? colors.primary : colors.muted }]}>
-              {canEdit ? "🛠️ MODE GESTION" : "👁️ LECTURE SEULE"}
+              {canEdit ? "🛠️ GESTION" : "👁️ LECTURE"}
             </Text>
           </View>
         </View>
@@ -134,7 +128,7 @@ export default function StockScreen() {
             backgroundColor: colors.surface,
             color: colors.foreground,
           }]}
-          placeholder="Rechercher un produit (boisson, riz...)"
+          placeholder="Chercher un ingrédient ou boisson..."
           placeholderTextColor={colors.muted}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -142,8 +136,7 @@ export default function StockScreen() {
 
         <View style={styles.listContainer}>
           {filteredItems.map(item => {
-            const status = getStockStatus(item.quantity, item.min_quantity, item.max_quantity);
-            const statusColor = getStatusColor(status);
+            const status = getStatus(item.quantite, item.seuil_alerte);
 
             return (
               <View
@@ -151,19 +144,19 @@ export default function StockScreen() {
                 style={[styles.itemCard, {
                   backgroundColor: colors.surface,
                   borderColor: colors.border,
-                  borderLeftColor: statusColor,
+                  borderLeftColor: status.color,
                 }]}
               >
                 <View style={styles.itemHeader}>
                   <View style={styles.flex1}>
-                    <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
-                    <Text style={[styles.itemQty, { color: statusColor }]}>
-                      {item.quantity} {item.unit}
+                    <Text style={[styles.itemName, { color: colors.foreground }]}>{item.nom}</Text>
+                    <Text style={[styles.itemQty, { color: status.color }]}>
+                      {item.quantite} {item.unite || 'unité(s)'}
                     </Text>
                   </View>
-                  <View style={[styles.statusBadge, { backgroundColor: statusColor + '15' }]}>
-                    <Text style={[styles.statusBadgeText, { color: statusColor }]}>
-                      {status === 'low' ? 'CRITIQUE' : status === 'high' ? 'DISPONIBLE' : 'STABLE'}
+                  <View style={[styles.statusBadge, { backgroundColor: status.color + '15' }]}>
+                    <Text style={[styles.statusBadgeText, { color: status.color }]}>
+                      {status.label}
                     </Text>
                   </View>
                 </View>
@@ -172,7 +165,7 @@ export default function StockScreen() {
                   <View style={styles.controlsRow}>
                     <TouchableOpacity
                       style={[styles.btnQty, { backgroundColor: colors.border }]}
-                      onPress={() => handleUpdateQuantity(item.id, item.quantity - 1)}
+                      onPress={() => handleUpdateQuantity(item.id, item.quantite - 1)}
                     >
                       <Text style={[styles.btnText, { color: colors.foreground }]}>−</Text>
                     </TouchableOpacity>
@@ -183,43 +176,36 @@ export default function StockScreen() {
                         backgroundColor: colors.background,
                         color: colors.foreground,
                       }]}
-                      value={item.quantity.toString()}
-                      onChangeText={(text) => handleUpdateQuantity(item.id, parseInt(text) || 0)}
+                      value={item.quantite.toString()}
+                      onChangeText={(text) => handleUpdateQuantity(item.id, parseFloat(text) || 0)}
                       keyboardType="numeric"
-                      selectTextOnFocus
                     />
 
                     <TouchableOpacity
                       style={[styles.btnQty, { backgroundColor: colors.primary }]}
-                      onPress={() => handleUpdateQuantity(item.id, item.quantity + 1)}
+                      onPress={() => handleUpdateQuantity(item.id, item.quantite + 1)}
                     >
                       <Text style={[styles.btnText, { color: '#fff' }]}>+</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
                   <View style={styles.readOnlyInfo}>
-                    <Text style={{ color: colors.muted, fontSize: 11, fontStyle: 'italic' }}>
-                      Contactez un manager pour modifier le stock.
+                    <Text style={{ color: colors.muted, fontSize: 11 }}>
+                      Seuil d'alerte configuré à : {item.seuil_alerte} {item.unite}
                     </Text>
                   </View>
                 )}
-
-                <View style={styles.rangeRow}>
-                  <Text style={styles.rangeText}>Alerte sous: {item.min_quantity} {item.unit}</Text>
-                  <Text style={styles.rangeText}>Cible: {item.max_quantity} {item.unit}</Text>
-                </View>
               </View>
             );
           })}
         </View>
 
-        {/* Résumé des alertes */}
         <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.summaryTitle, { color: colors.foreground }]}>Récapitulatif des alertes</Text>
+          <Text style={[styles.summaryTitle, { color: colors.foreground }]}>Alertes Stock</Text>
           <View style={styles.summaryRow}>
-            <Text style={{ color: colors.muted }}>Articles en rupture ou faibles :</Text>
+            <Text style={{ color: colors.muted }}>Produits sous le seuil :</Text>
             <Text style={[styles.bold, { color: '#ef4444' }]}>
-              {stockItems.filter(i => i.quantity <= i.min_quantity).length}
+              {stockItems.filter(i => i.quantite <= i.seuil_alerte).length}
             </Text>
           </View>
         </View>
@@ -231,28 +217,26 @@ export default function StockScreen() {
 const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollPadding: { padding: 20, paddingBottom: 40 },
-  headerSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
+  headerSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   flex1: { flex: 1 },
-  title: { fontSize: 32, fontWeight: '900', letterSpacing: -1 },
-  roleBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  title: { fontSize: 32, fontWeight: '900' },
+  roleBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
   roleText: { fontSize: 10, fontWeight: '800' },
-  searchInput: { borderWidth: 1.5, borderRadius: 15, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, marginBottom: 20 },
-  listContainer: { gap: 16 },
-  itemCard: { borderRadius: 18, padding: 18, borderLeftWidth: 6, borderWidth: 1, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5 },
-  itemHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 18 },
+  searchInput: { borderWidth: 1.5, borderRadius: 15, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, marginBottom: 20 },
+  listContainer: { gap: 12 },
+  itemCard: { borderRadius: 18, padding: 16, borderLeftWidth: 6, borderWidth: 1 },
+  itemHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   itemName: { fontSize: 18, fontWeight: '800' },
-  itemQty: { fontSize: 16, marginTop: 4, fontWeight: '700' },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start' },
-  statusBadgeText: { fontSize: 9, fontWeight: '900' },
-  controlsRow: { flexDirection: 'row', alignItems: 'center', gap: 15, marginBottom: 15 },
-  readOnlyInfo: { paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#f1f5f9', marginTop: 5 },
-  btnQty: { width: 50, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  btnText: { fontSize: 24, fontWeight: 'bold' },
-  qtyInput: { flex: 1, borderWidth: 1.5, borderRadius: 14, height: 50, textAlign: 'center', fontSize: 20, fontWeight: '800' },
-  rangeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTopWidth: 0.5, borderTopColor: '#e2e8f0' },
-  rangeText: { fontSize: 11, color: '#94a3b8', fontWeight: '600' },
-  summaryCard: { borderRadius: 18, padding: 20, borderWidth: 1, marginTop: 25 },
-  summaryTitle: { fontSize: 16, fontWeight: '800', marginBottom: 10 },
+  itemQty: { fontSize: 16, fontWeight: '700', marginTop: 2 },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignSelf: 'flex-start' },
+  statusBadgeText: { fontSize: 10, fontWeight: '900' },
+  controlsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  readOnlyInfo: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+  btnQty: { width: 45, height: 45, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  btnText: { fontSize: 20, fontWeight: 'bold' },
+  qtyInput: { flex: 1, borderWidth: 1.5, borderRadius: 12, height: 45, textAlign: 'center', fontSize: 18, fontWeight: '800' },
+  summaryCard: { borderRadius: 18, padding: 20, borderWidth: 1, marginTop: 20 },
+  summaryTitle: { fontSize: 16, fontWeight: '800', marginBottom: 8 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   bold: { fontWeight: '900', fontSize: 20 }
 });

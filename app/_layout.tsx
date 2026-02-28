@@ -9,11 +9,11 @@ import { Slot } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { View, ActivityIndicator } from 'react-native';
 
-// Imports corrigés pour la nouvelle structure (remontée d'un niveau vers la racine)
+// Importations recalibrées sur ta structure racine (Règle n°3)
 // @ts-ignore
 import { AppProvider, useApp } from '../app-context'; 
 // @ts-ignore
-import { CartProvider } from '../context/cart-context';
+import { CartProvider } from '../context/cart-context'; 
 // @ts-ignore
 import { supabase } from '../supabase';
 
@@ -71,11 +71,11 @@ function AppInitializer() {
 
     loadInitialData();
 
-    // Gestion du temps réel pour le stock (optionnel pour la stabilité APK)
+    // Gestion du temps réel pour le stock
     const stockSubscription = supabase
       .channel('stock-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock' }, () => {
-        // On peut rafraîchir silencieusement ici si nécessaire
+        // Optionnel : rafraîchir ici
       })
       .subscribe();
 

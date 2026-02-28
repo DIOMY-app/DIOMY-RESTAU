@@ -1,11 +1,11 @@
 /**
  * HomeScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/index.tsx
- * Correction : Suppression définitive de l'erreur TS sur la propriété 'name'
+ * Correction : Synchronisation stricte des routes avec les fichiers physiques (caisse, stock, CuisineScreen, etc.)
  */
 
 import React from "react";
-import { ScrollView, Text, View, TouchableOpacity, StyleSheet, Dimensions } from "react-native";
+import { ScrollView, Text, View, TouchableOpacity, StyleSheet, Dimensions, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 
 import { ScreenContainer } from "../components/screen-container";
@@ -24,46 +24,47 @@ interface QuickAction {
   allowedRoles: string[];
 }
 
+// CORRECTION : Routes alignées sur le contenu réel de ton dossier /app
 const QUICK_ACTIONS: QuickAction[] = [
   { 
     id: '1', 
     label: 'Caisse', 
     icon: '🛒', 
-    route: 'caisse', 
+    route: 'caisse', // Correspond à caisse.tsx
     color: '#8B6F47',
-    allowedRoles: ['admin', 'manager', 'waiter', 'cashier'] 
+    allowedRoles: ['admin', 'manager', 'waiter', 'cashier', 'staff'] 
   },
   { 
     id: '2', 
     label: 'Cuisine', 
     icon: '👨‍🍳', 
-    route: 'CuisineScreen', 
+    route: 'CuisineScreen', // Correspond à CuisineScreen.tsx
     color: '#EAB308',
-    allowedRoles: ['admin', 'manager', 'chef', 'waiter'] 
+    allowedRoles: ['admin', 'manager', 'chef', 'waiter', 'staff'] 
   },
   { 
     id: '3', 
     label: 'Stock', 
-    icon: 'stocks', 
-    route: 'stocks', 
+    icon: '📦', 
+    route: 'stock', // Correspond à stock.tsx (tu avais 'stocks')
     color: '#D4A574',
-    allowedRoles: ['admin', 'manager', 'chef'] 
+    allowedRoles: ['admin', 'manager', 'chef', 'staff'] 
   },
   { 
     id: '4', 
     label: 'Rapports', 
     icon: '📈', 
-    route: 'RapportScreen', 
+    route: 'RapportScreen', // Correspond à RapportScreen.tsx
     color: '#6BA55D',
-    allowedRoles: ['admin', 'manager'] 
+    allowedRoles: ['admin', 'manager', 'staff'] 
   },
   { 
     id: '5', 
     label: 'Équipe', 
     icon: '👥', 
-    route: 'employees', 
+    route: 'employees', // Correspond à employees.tsx
     color: '#C85A54',
-    allowedRoles: ['admin', 'manager'] 
+    allowedRoles: ['admin', 'manager', 'staff'] 
   },
 ];
 
@@ -72,11 +73,19 @@ export default function HomeScreen() {
   const colors = useColors();
   const { state } = useApp();
   
+  // Sécurité anti-crash si le state n'est pas encore chargé
+  if (!state) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color="#8B6F47" />
+        <Text style={{ marginTop: 10, color: '#666' }}>Chargement du système...</Text>
+      </View>
+    );
+  }
+
   const user = state?.user;
   const userRole = user?.role || 'staff';
-  
-  // CORRECTION : On utilise uniquement 'nom' conformément à l'interface User
-  const userName = user?.nom || 'Utilisateur';
+  const userName = user?.nom || 'Équipe O\'PIED';
 
   const filteredActions = QUICK_ACTIONS.filter(action => 
     action.allowedRoles.includes(userRole)
@@ -120,7 +129,8 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {['admin', 'manager', 'cashier'].includes(userRole) && (
+          {/* Section Statistiques conservée */}
+          {['admin', 'manager', 'cashier', 'staff', 'waiter'].includes(userRole) && (
             <View style={styles.statsRow}>
               <View style={[styles.statBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <Text style={[styles.statValue, { color: colors.foreground }]}>{todayOrders.length}</Text>
@@ -133,25 +143,31 @@ export default function HomeScreen() {
             </View>
           )}
 
+          {/* Grille des Services */}
           <View>
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Services</Text>
             <View style={styles.actionGrid}>
-              {filteredActions.map((action) => (
-                <TouchableOpacity
-                  key={action.id}
-                  style={[styles.actionCard, { backgroundColor: action.color }]}
-                  onPress={() => handleQuickAction(action.route)}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.iconCircle}>
-                    <Text style={{ fontSize: 24 }}>{action.icon}</Text>
-                  </View>
-                  <Text style={styles.actionLabel}>{action.label}</Text>
-                </TouchableOpacity>
-              ))}
+              {filteredActions.length > 0 ? (
+                filteredActions.map((action) => (
+                  <TouchableOpacity
+                    key={action.id}
+                    style={[styles.actionCard, { backgroundColor: action.color }]}
+                    onPress={() => handleQuickAction(action.route)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.iconCircle}>
+                      <Text style={{ fontSize: 24 }}>{action.icon}</Text>
+                    </View>
+                    <Text style={styles.actionLabel}>{action.label}</Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={{ color: colors.muted }}>Aucun service disponible pour votre rôle.</Text>
+              )}
             </View>
           </View>
 
+          {/* Section Ventes Récentes conservée */}
           {recentOrders.length > 0 && (
             <View>
               <View style={[styles.rowBetween, { marginBottom: 12 }]}>

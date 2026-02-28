@@ -1,7 +1,7 @@
 /**
  * CuisineScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/CuisineScreen.tsx
- * Écran de suivi de production en temps réel (Flux épuré)
+ * Écran de suivi de production en temps réel (Flux synchronisé avec SQL)
  */
 
 import React, { useState, useEffect } from 'react';
@@ -12,16 +12,16 @@ import {
 import { supabase } from '../supabase';
 import { useColors } from '../hooks/use-colors';
 
-// Interfaces pour le typage strict
+// Interfaces alignées sur ta table 'preparation_cuisine'
 interface ItemPreparation {
-  name: string;
-  quantity: number;
+  nom: string; // Changé 'name' par 'nom' pour cohérence avec le reste du projet
+  quantite: number; // Changé 'quantity' par 'quantite'
 }
 
 interface Preparation {
   id: number;
   table_numero: number | null;
-  items: ItemPreparation[];
+  items: any; // Type 'any' car JSONB arrive comme un objet/tableau
   statut: 'en_attente' | 'en_cours' | 'pret';
   creee_a: string;
 }
@@ -35,9 +35,9 @@ export default function CuisineScreen() {
   useEffect(() => {
     fetchPreparations();
 
-    // Inscription aux changements pour mettre à jour l'affichage instantanément
+    // Inscription au canal Realtime (Table: preparation_cuisine)
     const channel = supabase
-      .channel('cuisine_changes')
+      .channel('cuisine_realtime')
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'preparation_cuisine' }, 
         () => fetchPreparations()
@@ -54,39 +54,42 @@ export default function CuisineScreen() {
       const { data, error } = await supabase
         .from('preparation_cuisine')
         .select('*')
-        .neq('statut', 'pret') // On masque ce qui est déjà servi
-        .order('creee_a', { ascending: true }); // FIFO : Premier arrivé, premier servi
+        .neq('statut', 'pret') // Ne pas montrer ce qui est déjà prêt
+        .order('creee_a', { ascending: true }); // FIFO (Premier arrivé, premier servi)
 
       if (error) throw error;
       setPreparations(data || []);
     } catch (err: any) {
-      console.error("Erreur chargement cuisine:", err.message);
+      console.error("Erreur cuisine:", err.message);
     } finally {
       setLoading(false);
     }
   };
 
   /**
-   * Met à jour uniquement le statut de la préparation.
-   * Note : Le déstockage est géré par data-service au moment de la transaction.
+   * Transition de statut : en_attente -> en_cours -> pret
    */
   const updateStatus = async (prep: Preparation) => {
     let nextStatus: 'en_cours' | 'pret' = 'en_cours';
     if (prep.statut === 'en_cours') nextStatus = 'pret';
 
-    const { error } = await supabase
-      .from('preparation_cuisine')
-      .update({ statut: nextStatus })
-      .eq('id', prep.id);
+    try {
+      const { error } = await supabase
+        .from('preparation_cuisine')
+        .update({ statut: nextStatus })
+        .eq('id', prep.id);
 
-    if (error) {
-      Alert.alert("Erreur", "Impossible de mettre à jour le statut en cuisine.");
+      if (error) throw error;
+    } catch (err: any) {
+      Alert.alert("Erreur", "Impossible de mettre à jour la commande.");
     }
-    // Le rafraîchissement est géré automatiquement par le channel Realtime
   };
 
   const renderItem = ({ item }: { item: Preparation }) => {
     const isEnAttente = item.statut === 'en_attente';
+    
+    // On s'assure que items est bien un tableau (sécurité JSONB)
+    const itemsList = Array.isArray(item.items) ? item.items : [];
 
     return (
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -96,7 +99,7 @@ export default function CuisineScreen() {
               {item.table_numero ? `TABLE ${item.table_numero}` : '🛍️ À EMPORTER'}
             </Text>
             <Text style={styles.timeText}>
-              Reçu à {new Date(item.creee_a).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+              🔥 Commande reçue à {new Date(item.creee_a).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
             </Text>
           </View>
           
@@ -110,12 +113,14 @@ export default function CuisineScreen() {
         </View>
 
         <View style={[styles.itemsList, { borderTopColor: colors.border }]}>
-          {item.items.map((prod, index) => (
+          {itemsList.map((prod: any, index: number) => (
             <View key={index} style={styles.itemRowContainer}>
               <View style={[styles.qtyCircle, { backgroundColor: colors.primary }]}>
-                <Text style={styles.qtyText}>{prod.quantity}</Text>
+                <Text style={styles.qtyText}>{prod.quantite || prod.quantity || 1}</Text>
               </View>
-              <Text style={[styles.itemName, { color: colors.foreground }]}>{prod.name}</Text>
+              <Text style={[styles.itemName, { color: colors.foreground }]}>
+                {prod.nom || prod.name}
+              </Text>
             </View>
           ))}
         </View>
@@ -127,7 +132,7 @@ export default function CuisineScreen() {
           onPress={() => updateStatus(item)}
         >
           <Text style={styles.actionBtnText}>
-            {isEnAttente ? 'COMMENCER LA PRÉPARATION' : 'MARQUER COMME PRÊT'}
+            {isEnAttente ? 'LANCER EN CUISINE' : 'TERMINER / PRÊT'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -138,7 +143,7 @@ export default function CuisineScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.title, { color: colors.foreground }]}>👨‍🍳 CUISINE</Text>
-        <Text style={styles.subtitle}>{preparations.length} ticket(s) actif(s)</Text>
+        <Text style={styles.subtitle}>{preparations.length} commande(s) en cours</Text>
       </View>
 
       {loading ? (
@@ -153,8 +158,10 @@ export default function CuisineScreen() {
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Cuisine en ordre ! ✨</Text>
-              <Text style={{ color: colors.muted, marginTop: 8 }}>Aucune commande à préparer actuellement.</Text>
+              <Text style={[styles.emptyText, { color: colors.foreground }]}>Tout est servi ! ✨</Text>
+              <Text style={{ color: colors.muted, marginTop: 8, textAlign: 'center' }}>
+                Aucun ticket en attente pour le moment.
+              </Text>
             </View>
           }
         />
@@ -169,35 +176,35 @@ const styles = StyleSheet.create({
   header: { padding: 20, alignItems: 'center', borderBottomWidth: 1 },
   title: { fontSize: 26, fontWeight: '900', letterSpacing: 1 },
   subtitle: { color: '#64748b', marginTop: 4, fontSize: 14, fontWeight: '600' },
-  listContent: { padding: 16, gap: 16 },
+  listContent: { padding: 16, gap: 20 },
   card: { 
     borderRadius: 24, 
     borderWidth: 1.5, 
     padding: 20, 
     elevation: 4, 
     shadowColor: '#000', 
-    shadowOffset: { width: 0, height: 2 }, 
+    shadowOffset: { width: 0, height: 4 }, 
     shadowOpacity: 0.1, 
-    shadowRadius: 6 
+    shadowRadius: 8 
   },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
   tableText: { fontSize: 24, fontWeight: '900' },
   timeText: { fontSize: 13, color: '#94a3b8', marginTop: 4 },
-  statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
   itemsList: { marginBottom: 20, borderTopWidth: 1, paddingTop: 15 },
   itemRowContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   qtyCircle: { 
-    width: 38, 
-    height: 38, 
-    borderRadius: 14, 
+    width: 36, 
+    height: 36, 
+    borderRadius: 12, 
     justifyContent: 'center', 
     alignItems: 'center', 
     marginRight: 12 
   },
-  qtyText: { color: 'white', fontWeight: '900', fontSize: 18 },
-  itemName: { fontSize: 19, fontWeight: '700' },
+  qtyText: { color: 'white', fontWeight: '900', fontSize: 16 },
+  itemName: { fontSize: 18, fontWeight: '700' },
   actionBtn: { paddingVertical: 18, borderRadius: 16, alignItems: 'center', elevation: 2 },
   actionBtnText: { color: 'white', fontWeight: '900', fontSize: 16 },
-  emptyContainer: { alignItems: 'center', marginTop: 120, paddingHorizontal: 40 },
-  emptyText: { fontSize: 22, fontWeight: 'bold', textAlign: 'center' }
+  emptyContainer: { alignItems: 'center', marginTop: 100, paddingHorizontal: 40 },
+  emptyText: { fontSize: 22, fontWeight: 'bold' }
 });

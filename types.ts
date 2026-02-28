@@ -1,13 +1,13 @@
 /**
  * Types for O'PIED DU MONT Mobile App
  * Emplacement : racine (./types.ts)
- * Version synchronisée avec Supabase et les composants UI
+ * Version finale : Harmonisée avec Reducer, Caisse et Supabase
  */
 
 export interface User {
   id: string;
-  nom: string;      // Remplacé 'name' par 'nom'
-  telephone: string; // Remplacé 'email' par 'telephone'
+  nom: string;
+  telephone: string;
   role: 'admin' | 'manager' | 'staff' | 'waiter' | 'chef' | 'cashier';
   createdAt: string;
   updatedAt: string;
@@ -51,7 +51,8 @@ export interface CartItem {
   menuItemId: string;
   name: string;
   price: number;
-  quantity: number; // Harmonisé avec le reducer
+  quantity: number;   // Utilisé dans l'affichage UI
+  quantite?: number;  // Ajouté pour la compatibilité avec ton Reducer (UPDATE_CART_ITEM)
   notes?: string;
 }
 
@@ -59,10 +60,10 @@ export interface Order {
   id: string;
   items: CartItem[];
   total: number;
-  paymentMethod: 'cash' | 'card' | 'check';
+  paymentMethod: 'cash' | 'card' | 'check' | 'especes' | 'wave' | 'orange_money';
   status: 'pending' | 'completed' | 'cancelled';
-  statut?: 'attente' | 'paye' | 'annule'; // Ajouté pour la compatibilité UI (index.tsx)
-  created_at: string; // Format Supabase
+  statut?: 'attente' | 'paye' | 'annule'; 
+  created_at: string;
   updated_at: string;
 }
 
@@ -80,9 +81,9 @@ export interface Employee {
 export interface Schedule {
   id: string;
   employeeId: string;
-  dayOfWeek: number; // 0-6 (Sunday-Saturday)
-  startTime: string; // HH:mm format
-  endTime: string;   // HH:mm format
+  dayOfWeek: number;
+  startTime: string; 
+  endTime: string; 
   createdAt: string;
   updatedAt: string;
 }
@@ -107,7 +108,8 @@ export interface AppContextType {
   employees: Employee[];
 }
 
-export interface AppContextAction {
+// Correction du nom pour correspondre à l'import dans data-service
+export interface AppAction {
   type: string;
-  payload?: unknown;
+  payload?: any;
 }
