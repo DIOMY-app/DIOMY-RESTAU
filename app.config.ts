@@ -20,7 +20,7 @@ const config: ExpoConfig = {
       backgroundColor: "#FFFFFF",
       foregroundImage: "./assets/logo.png"
     },
-    package: "com.opieddumont.app",
+    package: "com.opied_du_mont.app",
     permissions: ["POST_NOTIFICATIONS", "WRITE_EXTERNAL_STORAGE"],
   },
   web: {
@@ -49,10 +49,10 @@ const config: ExpoConfig = {
       {
         android: {
           minSdkVersion: 24,
-          compileSdkVersion: 34,
+          compileSdkVersion: 35,
           targetSdkVersion: 34,
-          // VERROU CRITIQUE : Force la version stable testée par Expo pour le SDK 51
-          kotlinVersion: "1.8.10",
+          // Correction critique pour expo-linking sur SDK 51
+          kotlinVersion: "1.9.25",
           enableProguardInReleaseBuilds: true
         }
       }
