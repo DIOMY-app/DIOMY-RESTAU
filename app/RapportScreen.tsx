@@ -9,6 +9,7 @@ import {
   View, Text, ScrollView, StyleSheet, RefreshControl, 
   TouchableOpacity, Alert, Dimensions, ActivityIndicator 
 } from 'react-native';
+// Importation sécurisée pour le build
 import { LineChart } from "react-native-chart-kit";
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
@@ -61,16 +62,15 @@ export default function RapportScreen() {
   });
 
   const [stats, setStats] = useState({
-    caTheorique: 0,   // Total calculé par l'app (Transactions)
-    caReel: 0,        // Total réellement versé à la compta (Clôtures)
-    depensesTotal: 0, // Dépenses compta
-    beneficeNet: 0,   // caReel - depensesTotal
-    ecartTotal: 0,    // Somme des écarts de caisse
+    caTheorique: 0,
+    caReel: 0,
+    depensesTotal: 0,
+    beneficeNet: 0,
+    ecartTotal: 0,
     nbVentes: 0,
     parPaiement: { especes: 0, wave: 0, orange_money: 0, carte: 0 } as PaymentStats,
   });
 
-  // Vérification stricte des droits
   const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
 
   const fetchData = async () => {
@@ -91,7 +91,6 @@ export default function RapportScreen() {
 
       const isoStart = startDate.toISOString();
 
-      // 1. Récupération des Transactions (Ventes App)
       const { data: txData, error: txError } = await supabase
         .from('transactions') 
         .select('id, creee_a, montant_total, mode_paiement')
@@ -100,7 +99,6 @@ export default function RapportScreen() {
 
       if (txError) throw txError;
 
-      // 2. Récupération des Dépenses
       const { data: expData, error: expError } = await supabase
         .from('depenses')
         .select('id, montant, creee_a')
@@ -108,7 +106,6 @@ export default function RapportScreen() {
 
       if (expError) throw expError;
 
-      // 3. Récupération des Versements réels (Clôtures de caisse)
       const { data: cloData, error: cloError } = await supabase
         .from('clotures')
         .select('total_physique, ecart, creee_a')
@@ -116,7 +113,6 @@ export default function RapportScreen() {
 
       if (cloError) throw cloError;
       
-      // 4. Récupération de la fidélité (Vue Supabase)
       const { data: clientsData } = await supabase
         .from('vue_fidelite_clients')
         .select('*')
@@ -129,12 +125,9 @@ export default function RapportScreen() {
       const allExp = expData || [];
       const allClo = cloData || [];
       
-      // --- LOGIQUE DE PRÉPARATION DES DONNÉES ---
-      
       const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
       const last7DaysMap: Map<string, number> = new Map();
       
-      // Initialiser les 7 derniers jours à 0
       for(let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
@@ -147,15 +140,11 @@ export default function RapportScreen() {
       allTx.forEach((t) => {
         const amount = Number(t.montant_total);
         totalVentes += amount;
-        
-        // Données pour le graphique
         const tDate = new Date(t.creee_a);
         const dayName = days[tDate.getDay()];
         if (last7DaysMap.has(dayName)) {
           last7DaysMap.set(dayName, (last7DaysMap.get(dayName) || 0) + amount);
         }
-        
-        // Répartition par mode
         const mode = (t.mode_paiement || 'especes').toLowerCase();
         if (mode in paiements) paiements[mode] += amount;
         else paiements.especes += amount;
@@ -237,7 +226,6 @@ export default function RapportScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* FILTRES DE PÉRIODE */}
         <View style={styles.filterContainer}>
           {(['jour', 'semaine', 'mois'] as Period[]).map((p) => (
             <TouchableOpacity 
@@ -258,7 +246,6 @@ export default function RapportScreen() {
           ))}
         </View>
 
-        {/* CARD RÉSUMÉ FINANCIER RÉEL */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.summaryRow}>
             <View style={{ alignItems: 'center', flex: 1 }}>
@@ -294,28 +281,29 @@ export default function RapportScreen() {
           </Text>
         </View>
 
-        {/* GRAPHIQUE CA */}
         <View style={styles.chartWrapper}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Évolution CA (7j)</Text>
-          <LineChart
-            data={chartData}
-            width={screenWidth - 32}
-            height={180}
-            chartConfig={{
-              backgroundColor: colors.surface,
-              backgroundGradientFrom: colors.surface,
-              backgroundGradientTo: colors.surface,
-              decimalPlaces: 0,
-              color: (opacity = 1) => colors.primary,
-              labelColor: (opacity = 1) => colors.muted,
-              propsForDots: { r: "4", strokeWidth: "2", stroke: colors.primary }
-            }}
-            bezier
-            style={styles.chart}
-          />
+          {/* Rendu conditionnel pour éviter les crashs de build si SVG manque */}
+          {chartData.labels.length > 0 && (
+            <LineChart
+              data={chartData}
+              width={screenWidth - 32}
+              height={180}
+              chartConfig={{
+                backgroundColor: colors.surface,
+                backgroundGradientFrom: colors.surface,
+                backgroundGradientTo: colors.surface,
+                decimalPlaces: 0,
+                color: (opacity = 1) => colors.primary,
+                labelColor: (opacity = 1) => colors.muted,
+                propsForDots: { r: "4", strokeWidth: "2", stroke: colors.primary }
+              }}
+              bezier
+              style={styles.chart}
+            />
+          )}
         </View>
 
-        {/* RÉPARTITION PAIEMENTS */}
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground, marginBottom: 15 }]}>Détail des Ventes (App)</Text>
           {Object.entries(stats.parPaiement).map(([mode, montant]) => (
@@ -326,7 +314,6 @@ export default function RapportScreen() {
           ))}
         </View>
 
-        {/* TOP CLIENTS */}
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.foreground, marginBottom: 15 }]}>🏆 Top Clients (Fidélité)</Text>
           {topClients.length > 0 ? topClients.map((item) => (
