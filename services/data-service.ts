@@ -1,7 +1,7 @@
 /**
  * Data Service - O'PIED DU MONT
  * Gère la synchronisation globale (Menu, Catégories, Stocks, Employés)
- * Version Centralisée : Charge toutes les données vitales au démarrage
+ * Version Optimisée : Déduction atomique via RPC (decrement_stock)
  */
 
 import { supabase } from '../supabase';
@@ -10,7 +10,6 @@ import { CartItem } from '../types';
 
 /**
  * Rafraîchit TOUTES les données de l'application
- * Appelé au démarrage et lors d'un "Pull to Refresh"
  */
 export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
   dispatch({ type: 'SET_LOADING', payload: true });
@@ -18,7 +17,6 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
   try {
     const now = new Date().toISOString();
 
-    // 1. Chargement parallèle pour plus de rapidité (Promise.all)
     const [
       { data: categoriesData, error: catError },
       { data: menuData, error: menuError },
@@ -31,13 +29,11 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
       supabase.from('employes').select('*').eq('actif', true)
     ]);
 
-    // Vérification des erreurs
     if (catError) throw catError;
     if (menuError) throw menuError;
     if (stockError) throw stockError;
     if (empError) throw empError;
 
-    // 2. Formatage des Catégories (aligné sur types.ts)
     const formattedCategories = (categoriesData || []).map(cat => ({
       id: cat.id.toString(),
       name: cat.nom,
@@ -47,7 +43,6 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
       updatedAt: cat.created_at || now
     }));
 
-    // 3. Formatage du Menu avec lien catégorie
     const formattedMenuItems = (menuData || []).map(item => {
       const categoryObj = formattedCategories.find(c => c.id === item.categorie_id.toString());
       return {
@@ -63,7 +58,6 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
       };
     });
 
-    // 4. Formatage des Stocks
     const formattedStocks = (stockData || []).map(s => ({
       id: s.id.toString(),
       name: s.nom,
@@ -76,7 +70,6 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
       updatedAt: now
     }));
 
-    // 5. Formatage des Employés
     const formattedEmployees = (employeesData || []).map(emp => ({
       id: emp.id.toString(),
       nom: emp.nom,
@@ -88,7 +81,6 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
       updated_at: emp.created_at || now
     }));
 
-    // 6. Mise à jour massive du State Global
     dispatch({
       type: 'SET_DATA',
       payload: {
@@ -108,64 +100,59 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
 };
 
 /**
- * LOGIQUE COMPLEXE : Déduit les stocks via la table 'menu_recettes'
+ * DÉDUCTION DES STOCKS (Version RPC Atomique)
+ * Gère les recettes (multi-ingrédients) et les produits directs
  */
 export const deductStockFromOrder = async (items: CartItem[]) => {
   try {
     for (const item of items) {
-      // On cherche si l'article possède une recette
-      const { data: recette, error: recipeError } = await supabase
+      const menuId = parseInt(item.menuItemId || item.id);
+
+      // 1. Récupérer la recette pour cet article
+      const { data: recette } = await supabase
         .from('menu_recettes')
         .select('stock_id, quantite_consommee')
-        .eq('menu_id', parseInt(item.menuItemId || item.id));
+        .eq('menu_id', menuId);
 
-      if (!recipeError && recette && recette.length > 0) {
-        // Cas A : Déduction par ingrédients
+      if (recette && recette.length > 0) {
+        // SCÉNARIO A : RECETTE (Ex: Burger déduit pain, viande...)
         for (const ingredient of recette) {
-          const { data: stockNow } = await supabase
-            .from('stock')
-            .select('quantite')
-            .eq('id', ingredient.stock_id)
-            .single();
-
-          if (stockNow) {
-            const perteTotale = Number(ingredient.quantite_consommee) * item.quantity;
-            await supabase
-              .from('stock')
-              .update({ quantite: Number(stockNow.quantite) - perteTotale })
-              .eq('id', ingredient.stock_id);
-          }
+          const quantiteARetirer = Number(ingredient.quantite_consommee) * item.quantity;
+          
+          // Appel de la fonction SQL créée précédemment
+          await supabase.rpc('decrement_stock', { 
+            row_id: ingredient.stock_id, 
+            amount: quantiteARetirer 
+          });
         }
       } else {
-        // Cas B : Déduction directe (nom à nom)
+        // SCÉNARIO B : PRODUIT DIRECT (Ex: Canette de Coca)
         const { data: stockItem } = await supabase
           .from('stock')
-          .select('id, quantite')
+          .select('id')
           .eq('nom', item.name)
           .single();
 
         if (stockItem) {
-          await supabase
-            .from('stock')
-            .update({ quantite: Number(stockItem.quantite) - item.quantity })
-            .eq('id', stockItem.id);
+          await supabase.rpc('decrement_stock', { 
+            row_id: stockItem.id, 
+            amount: item.quantity 
+          });
         }
       }
     }
     return { success: true };
   } catch (error: any) {
-    console.error('Erreur Déstockage Service:', error.message);
+    console.error('Erreur Déstockage Critique:', error.message);
     throw error;
   }
 };
 
 /**
- * ENVOI EN CUISINE 
- * Note : On reformate ici pour que l'écran Cuisine reçoive 'nom' et 'quantite' (JSONB)
+ * ENVOI EN CUISINE
  */
 export const sendToKitchen = async (transactionId: number, tableNum: number | null, items: CartItem[]) => {
   try {
-    // Formatage pour éviter que l'écran Cuisine affiche du vide
     const itemsFormatted = items.map(i => ({
       nom: i.name,
       quantite: i.quantity
@@ -177,12 +164,13 @@ export const sendToKitchen = async (transactionId: number, tableNum: number | nu
         transaction_id: transactionId,
         table_numero: tableNum,
         items: itemsFormatted, 
-        statut: 'en_attente'
+        statut: 'en_attente',
+        created_at: new Date().toISOString()
       }]);
 
     if (error) throw error;
   } catch (error: any) {
-    console.error('Erreur Envoi Cuisine Service:', error.message);
+    console.error('Erreur Cuisine:', error.message);
     throw error;
   }
 };

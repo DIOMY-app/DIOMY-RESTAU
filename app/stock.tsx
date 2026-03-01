@@ -1,13 +1,13 @@
 /**
  * Stock Management Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/stocks.tsx
- * Amélioration : Alertes critiques visuelles et filtres rapides
+ * Version : Gestion Inventaire + Recettes + Alertes Visuelles Renforcées
  */
 
 import React, { useState, useEffect } from 'react';
 import { 
   View, Text, ScrollView, TouchableOpacity, TextInput, 
-  StyleSheet, ActivityIndicator, Alert, RefreshControl 
+  StyleSheet, ActivityIndicator, Alert, RefreshControl, Modal, FlatList 
 } from 'react-native';
 
 import { ScreenContainer } from '../components/screen-container';
@@ -17,22 +17,50 @@ import { useApp } from '../app-context';
 import { refreshAppData } from '../services/data-service';
 import { StockItem } from '../types';
 
+type RecipeLink = {
+  id: number;
+  stock_id: number;
+  quantite_consommee: number;
+  stock_name?: string;
+};
+
 export default function StockScreen() {
   const colors = useColors();
   const { state, dispatch } = useApp();
   
+  // États généraux
   const [searchQuery, setSearchQuery] = useState('');
-  const [showOnlyAlerts, setShowOnlyAlerts] = useState(false); // Nouveau filtre
+  const [showOnlyAlerts, setShowOnlyAlerts] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeMode, setActiveMode] = useState<'inventaire' | 'recettes'>('inventaire');
+
+  // États Inventaire (Ajout)
+  const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+  const [newItem, setNewItem] = useState({ name: '', quantity: '0', minQuantity: '5', unit: 'pcs' });
+
+  // États Recettes
+  const [selectedMenuItem, setSelectedMenuItem] = useState<any>(null);
+  const [recipeItems, setRecipeItems] = useState<RecipeLink[]>([]);
+  const [isRecipeModalVisible, setIsRecipeModalVisible] = useState(false);
+  const [selectedStockId, setSelectedStockId] = useState<string>('');
+  const [qtyToConsume, setQtyToConsume] = useState('');
 
   const userRole = state?.user?.role || '';
+  const isAdmin = userRole.toLowerCase() === 'admin';
   const canEdit = ['admin', 'manager', 'chef'].includes(userRole.toLowerCase());
   const stockItems = state.stockItems || [];
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Charger la recette quand on change de plat
+  useEffect(() => {
+    if (selectedMenuItem && activeMode === 'recettes') {
+      loadRecipe(selectedMenuItem.id);
+    }
+  }, [selectedMenuItem, activeMode]);
 
   const loadData = async () => {
     setLoading(true);
@@ -46,40 +74,90 @@ export default function StockScreen() {
     setRefreshing(false);
   };
 
+  // --- LOGIQUE INVENTAIRE ---
+
+  const handleCreateItem = async () => {
+    if (!newItem.name) return Alert.alert("Erreur", "Le nom est obligatoire");
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('stock')
+        .insert([{
+          nom: newItem.name,
+          quantite: parseFloat(newItem.quantity),
+          seuil_alerte: parseFloat(newItem.minQuantity),
+          unite: newItem.unit
+        }]);
+      if (error) throw error;
+      setIsAddModalVisible(false);
+      setNewItem({ name: '', quantity: '0', minQuantity: '5', unit: 'pcs' });
+      await refreshAppData(dispatch);
+      Alert.alert("Succès", "Article ajouté au stock.");
+    } catch (error: any) {
+      Alert.alert("Erreur", error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleUpdateQuantity = async (id: string, newQty: number) => {
     if (!canEdit) return;
     const finalQty = Math.max(0, newQty);
-    
-    // Mise à jour optimiste
-    const updatedStocks = stockItems.map(item => 
-      item.id === id ? { ...item, quantity: finalQty } : item
-    );
-
-    dispatch({
-      type: 'SET_DATA',
-      payload: { stockItems: updatedStocks }
-    });
-
     try {
       const { error } = await supabase
         .from('stock')
         .update({ quantite: finalQty })
         .eq('id', parseInt(id));
-
       if (error) throw error;
+      await refreshAppData(dispatch);
     } catch (error: any) {
-      Alert.alert("Erreur sync", "Impossible de mettre à jour le stock en ligne.");
-      refreshAppData(dispatch);
+      Alert.alert("Erreur sync", error.message);
     }
   };
 
-  const getStatus = (q: number, seuil: number) => {
-    if (q <= 0) return { label: 'RUPTURE', color: '#ef4444', level: 2 };
-    if (q <= seuil) return { label: 'CRITIQUE', color: '#f59e0b', level: 1 };
-    return { label: 'DISPONIBLE', color: '#22c55e', level: 0 };
+  // --- LOGIQUE RECETTES ---
+
+  const loadRecipe = async (menuId: string) => {
+    const { data, error } = await supabase
+      .from('menu_recettes')
+      .select(`id, stock_id, quantite_consommee, stock:stock_id (nom)`)
+      .eq('menu_id', parseInt(menuId));
+
+    if (!error && data) {
+      setRecipeItems(data.map((d: any) => ({
+        id: d.id,
+        stock_id: d.stock_id,
+        quantite_consommee: d.quantite_consommee,
+        stock_name: d.stock?.nom || 'Inconnu'
+      })));
+    }
   };
 
-  // Logique de filtrage combinée
+  const handleAddIngredient = async () => {
+    if (!selectedStockId || !qtyToConsume) return;
+    const { error } = await supabase.from('menu_recettes').insert([{
+      menu_id: parseInt(selectedMenuItem.id),
+      stock_id: parseInt(selectedStockId),
+      quantite_consommee: parseFloat(qtyToConsume.replace(',', '.'))
+    }]);
+    if (!error) {
+      setIsRecipeModalVisible(false);
+      setQtyToConsume('');
+      loadRecipe(selectedMenuItem.id);
+    }
+  };
+
+  const handleDeleteIngredient = async (id: number) => {
+    const { error } = await supabase.from('menu_recettes').delete().eq('id', id);
+    if (!error) loadRecipe(selectedMenuItem.id);
+  };
+
+  const getStatus = (q: number, seuil: number) => {
+    if (q <= 0) return { label: 'RUPTURE', color: '#ef4444', bg: '#fef2f2' };
+    if (q <= seuil) return { label: 'CRITIQUE', color: '#f59e0b', bg: '#fffbeb' };
+    return { label: 'OK', color: '#22c55e', bg: 'transparent' };
+  };
+
   const filteredItems = stockItems.filter(item => {
     const matchesSearch = (item.name || '').toLowerCase().includes(searchQuery.toLowerCase());
     const isAlert = item.quantity <= item.minQuantity;
@@ -88,163 +166,231 @@ export default function StockScreen() {
 
   const alertCount = stockItems.filter(i => i.quantity <= i.minQuantity).length;
 
-  if (loading && stockItems.length === 0) {
-    return (
-      <ScreenContainer style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: 10, color: colors.muted }}>Accès à l'inventaire...</Text>
-      </ScreenContainer>
-    );
-  }
-
   return (
     <ScreenContainer>
-      <ScrollView 
-        contentContainerStyle={styles.scrollPadding} 
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
-        }
-      >
-        <View style={styles.headerSection}>
-          <View>
-            <Text style={[styles.title, { color: colors.foreground }]}>Stocks</Text>
-            <Text style={{ color: colors.muted, fontSize: 13 }}>Suivi des ingrédients à Korhogo</Text>
-          </View>
-          <View style={[styles.roleBadge, { backgroundColor: canEdit ? colors.primary + '20' : colors.border }]}>
-            <Text style={[styles.roleText, { color: canEdit ? colors.primary : colors.muted }]}>
-              {canEdit ? "🛠️ GESTION" : "👁️ LECTURE"}
-            </Text>
-          </View>
+      <View style={styles.headerContainer}>
+        <View style={styles.headerTop}>
+          <Text style={[styles.title, { color: colors.foreground }]}>Stocks</Text>
+          {isAdmin && activeMode === 'inventaire' && (
+            <TouchableOpacity 
+              style={[styles.addButton, { backgroundColor: colors.primary }]} 
+              onPress={() => setIsAddModalVisible(true)}
+            >
+              <Text style={styles.addButtonText}>+ ARRIVAGE</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* BANDEAU D'ALERTE DYNAMIQUE */}
-        {alertCount > 0 && (
-          <TouchableOpacity 
-            onPress={() => setShowOnlyAlerts(!showOnlyAlerts)}
-            style={[styles.alertBanner, { backgroundColor: showOnlyAlerts ? '#ef4444' : '#fef2f2', borderColor: '#fee2e2' }]}
-          >
-            <Text style={[styles.alertBannerText, { color: showOnlyAlerts ? '#fff' : '#ef4444' }]}>
-              ⚠️ {alertCount} produit{alertCount > 1 ? 's sont' : ' est'} en seuil critique !
-            </Text>
-            <Text style={[styles.alertBannerSub, { color: showOnlyAlerts ? '#fff' : '#ef4444' }]}>
-              {showOnlyAlerts ? "Voir tout le stock" : "Filtrer les alertes"}
-            </Text>
+        <View style={styles.tabsRow}>
+          <TouchableOpacity onPress={() => setActiveMode('inventaire')} style={[styles.tab, activeMode === 'inventaire' && { borderBottomColor: colors.primary, borderBottomWidth: 3 }]}>
+            <Text style={[styles.tabText, { color: activeMode === 'inventaire' ? colors.primary : colors.muted }]}>Inventaire</Text>
           </TouchableOpacity>
-        )}
+          <TouchableOpacity onPress={() => setActiveMode('recettes')} style={[styles.tab, activeMode === 'recettes' && { borderBottomColor: colors.primary, borderBottomWidth: 3 }]}>
+            <Text style={[styles.tabText, { color: activeMode === 'recettes' ? colors.primary : colors.muted }]}>Configuration Recettes</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
 
-        <TextInput
-          style={[styles.searchInput, {
-            borderColor: colors.border,
-            backgroundColor: colors.surface,
-            color: colors.foreground,
-          }]}
-          placeholder="Chercher un ingrédient ou boisson..."
-          placeholderTextColor={colors.muted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
+      {activeMode === 'inventaire' ? (
+        <ScrollView 
+          contentContainerStyle={styles.scrollPadding} 
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        >
+          {alertCount > 0 && (
+            <TouchableOpacity 
+              onPress={() => setShowOnlyAlerts(!showOnlyAlerts)} 
+              style={[styles.alertBanner, { backgroundColor: showOnlyAlerts ? '#ef4444' : '#fef2f2' }]}
+            >
+              <Text style={{ color: showOnlyAlerts ? '#fff' : '#ef4444', fontWeight: '900', textAlign: 'center' }}>
+                ⚠️ {alertCount} ARTICLES EN SEUIL CRITIQUE ! {showOnlyAlerts ? "(Voir tout)" : "(Filtrer)"}
+              </Text>
+            </TouchableOpacity>
+          )}
 
-        <View style={styles.listContainer}>
-          {filteredItems.map(item => {
-            const status = getStatus(item.quantity, item.minQuantity);
+          <TextInput 
+            style={[styles.searchInput, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]} 
+            placeholder="Rechercher un ingrédient..." 
+            value={searchQuery} 
+            onChangeText={setSearchQuery} 
+          />
 
-            return (
-              <View
-                key={item.id}
-                style={[styles.itemCard, {
-                  backgroundColor: colors.surface,
-                  borderColor: colors.border,
-                  borderLeftColor: status.color,
-                }]}
-              >
-                <View style={styles.itemHeader}>
-                  <View style={styles.flex1}>
-                    <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
-                    <View style={styles.qtyRow}>
-                      <Text style={[styles.itemQty, { color: status.color }]}>
-                        {item.quantity} {item.unit || 'unité(s)'}
-                      </Text>
-                      <Text style={{ color: colors.muted, fontSize: 12, marginLeft: 8 }}>
-                        (Seuil: {item.minQuantity})
-                      </Text>
+          <View style={styles.listContainer}>
+            {filteredItems.map(item => {
+              const status = getStatus(item.quantity, item.minQuantity);
+              return (
+                <View key={item.id} style={[styles.itemCard, { backgroundColor: colors.surface, borderColor: colors.border, borderLeftColor: status.color }]}>
+                  <View style={styles.itemHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
+                      <Text style={{ color: colors.muted, fontSize: 12 }}>{item.unit} • Seuil d'alerte: {item.minQuantity}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={{ color: status.color, fontWeight: '900', fontSize: 22 }}>{item.quantity}</Text>
+                      <Text style={{ color: status.color, fontSize: 10, fontWeight: 'bold' }}>{status.label}</Text>
                     </View>
                   </View>
-                  <View style={[styles.statusBadge, { backgroundColor: status.color + '15' }]}>
-                    <Text style={[styles.statusBadgeText, { color: status.color }]}>
-                      {status.label}
-                    </Text>
-                  </View>
+                  
+                  {canEdit && (
+                    <View style={styles.controlsRow}>
+                      <TouchableOpacity 
+                        style={[styles.btnQty, { backgroundColor: colors.border }]} 
+                        onPress={() => handleUpdateQuantity(item.id, item.quantity - 1)}
+                      >
+                        <Text style={{ fontSize: 20, fontWeight: 'bold' }}>-</Text>
+                      </TouchableOpacity>
+                      <TextInput 
+                        style={[styles.qtyInput, { color: colors.foreground, borderColor: colors.border }]} 
+                        keyboardType="numeric" 
+                        value={item.quantity.toString()} 
+                        onChangeText={(v) => handleUpdateQuantity(item.id, parseFloat(v) || 0)} 
+                      />
+                      <TouchableOpacity 
+                        style={[styles.btnQty, { backgroundColor: colors.primary }]} 
+                        onPress={() => handleUpdateQuantity(item.id, item.quantity + 1)}
+                      >
+                        <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
-
-                {canEdit && (
-                  <View style={styles.controlsRow}>
-                    <TouchableOpacity
-                      style={[styles.btnQty, { backgroundColor: colors.border }]}
-                      onPress={() => handleUpdateQuantity(item.id, item.quantity - 1)}
-                    >
-                      <Text style={[styles.btnText, { color: colors.foreground }]}>−</Text>
-                    </TouchableOpacity>
-
-                    <TextInput
-                      style={[styles.qtyInput, {
-                        borderColor: colors.border,
-                        backgroundColor: colors.background,
-                        color: colors.foreground,
-                      }]}
-                      value={item.quantity.toString()}
-                      onChangeText={(text) => handleUpdateQuantity(item.id, parseFloat(text) || 0)}
-                      keyboardType="numeric"
-                    />
-
-                    <TouchableOpacity
-                      style={[styles.btnQty, { backgroundColor: colors.primary }]}
-                      onPress={() => handleUpdateQuantity(item.id, item.quantity + 1)}
-                    >
-                      <Text style={[styles.btnText, { color: '#fff' }]}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </View>
-
-        {filteredItems.length === 0 && (
-          <View style={styles.emptyState}>
-            <Text style={{ color: colors.muted }}>Aucun produit trouvé.</Text>
+              );
+            })}
           </View>
-        )}
+        </ScrollView>
+      ) : (
+        <View style={styles.recetteContainer}>
+          <Text style={[styles.sectionLabel, { marginBottom: 15 }]}>Associer des ingrédients aux plats pour le déstockage auto</Text>
+          <View style={styles.recetteSplit}>
+            <View style={{ flex: 1 }}>
+              <FlatList
+                data={state.menuItems}
+                keyExtractor={(item) => item.id.toString()}
+                renderItem={({ item }) => (
+                  <TouchableOpacity 
+                    style={[styles.menuItemMini, { backgroundColor: colors.surface, borderColor: selectedMenuItem?.id === item.id ? colors.primary : colors.border }]}
+                    onPress={() => setSelectedMenuItem(item)}
+                  >
+                    <Text style={{ color: colors.foreground, fontWeight: 'bold', fontSize: 12 }}>{item.name}</Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+            <View style={[styles.recetteDetail, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              {selectedMenuItem ? (
+                <>
+                  <Text style={{ color: colors.foreground, fontWeight: '800', marginBottom: 10 }}>Ingrédients pour :{"\n"}{selectedMenuItem.name}</Text>
+                  {recipeItems.length > 0 ? recipeItems.map(ri => (
+                    <View key={ri.id} style={styles.recipeRow}>
+                      <Text style={{ flex: 1, fontSize: 12, color: colors.foreground }}>{ri.stock_name}</Text>
+                      <Text style={{ fontWeight: 'bold', color: colors.primary }}>{ri.quantite_consommee}</Text>
+                      <TouchableOpacity onPress={() => handleDeleteIngredient(ri.id)}>
+                        <Text style={{ color: '#ef4444', marginLeft: 10, fontWeight: 'bold' }}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )) : (
+                    <Text style={{ color: colors.muted, fontSize: 11, fontStyle: 'italic', marginVertical: 10 }}>Aucun ingrédient lié.</Text>
+                  )}
+                  <TouchableOpacity style={[styles.miniAddBtn, { backgroundColor: colors.primary }]} onPress={() => setIsRecipeModalVisible(true)}>
+                    <Text style={{ color: 'white', fontSize: 11, fontWeight: 'bold' }}>+ AJOUTER INGRÉDIENT</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <View style={styles.centerContent}>
+                  <Text style={{ color: colors.muted, textAlign: 'center' }}>Sélectionnez un plat à gauche pour configurer sa recette</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+      )}
 
-        <View style={{ height: 40 }} />
-      </ScrollView>
+      {/* MODAL AJOUT ARTICLE STOCK */}
+      <Modal visible={isAddModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Nouvel Ingrédient / Arrivage</Text>
+            <TextInput style={[styles.input, { color: colors.foreground, borderColor: colors.border }]} placeholder="Nom (ex: Sac de Riz 50kg)" value={newItem.name} onChangeText={(v) => setNewItem({...newItem, name: v})} />
+            <View style={{ flexDirection: 'row', gap: 10, marginVertical: 10 }}>
+              <TextInput style={[styles.input, { flex: 1, color: colors.foreground, borderColor: colors.border }]} placeholder="Qté initiale" keyboardType="numeric" value={newItem.quantity} onChangeText={(v) => setNewItem({...newItem, quantity: v})} />
+              <TextInput style={[styles.input, { flex: 1, color: colors.foreground, borderColor: colors.border }]} placeholder="Unité (kg, l, pcs)" value={newItem.unit} onChangeText={(v) => setNewItem({...newItem, unit: v})} />
+            </View>
+            <TextInput style={[styles.input, { color: colors.foreground, borderColor: colors.border }]} placeholder="Seuil d'alerte (Stock mini)" keyboardType="numeric" value={newItem.minQuantity} onChangeText={(v) => setNewItem({...newItem, minQuantity: v})} />
+            <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setIsAddModalVisible(false)}><Text style={{ color: colors.muted, fontWeight: '600' }}>ANNULER</Text></TouchableOpacity>
+              <TouchableOpacity onPress={handleCreateItem} style={[styles.saveBtn, { backgroundColor: colors.primary }]}><Text style={{ color: '#fff', fontWeight: '800' }}>CRÉER L'ARTICLE</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL LIER RECETTE */}
+      <Modal visible={isRecipeModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={{ fontWeight: '900', fontSize: 18, color: colors.foreground, marginBottom: 15 }}>Lier un ingrédient</Text>
+            <Text style={{ fontSize: 12, color: colors.muted, marginBottom: 10 }}>Sélectionnez l'élément de stock à déduire :</Text>
+            <ScrollView style={{ maxHeight: 250 }}>
+              {stockItems.map((s: StockItem) => (
+                <TouchableOpacity 
+                  key={s.id} 
+                  onPress={() => setSelectedStockId(s.id)} 
+                  style={[styles.stockOption, { backgroundColor: selectedStockId === s.id ? colors.primary : colors.background, borderColor: colors.border, borderWidth: 1 }]}
+                >
+                  <Text style={{ fontWeight: 'bold', color: selectedStockId === s.id ? 'white' : colors.foreground }}>{s.name}</Text>
+                  <Text style={{ fontSize: 10, color: selectedStockId === s.id ? 'white' : colors.muted }}>Unité : {s.unit}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TextInput 
+              style={[styles.input, { marginTop: 15, color: colors.foreground, borderColor: colors.border }]} 
+              placeholder="Quantité utilisée par plat (ex: 0.2)" 
+              keyboardType="numeric" 
+              value={qtyToConsume} 
+              onChangeText={setQtyToConsume} 
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setIsRecipeModalVisible(false)}><Text style={{ color: colors.muted, fontWeight: '600' }}>ANNULER</Text></TouchableOpacity>
+              <TouchableOpacity onPress={handleAddIngredient} style={[styles.saveBtn, { backgroundColor: colors.success }]}><Text style={{ color: 'white', fontWeight: '800' }}>LIER À LA RECETTE</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scrollPadding: { padding: 20, paddingBottom: 40 },
-  headerSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  flex1: { flex: 1 },
-  title: { fontSize: 32, fontWeight: '900' },
-  roleBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  roleText: { fontSize: 10, fontWeight: '800' },
-  alertBanner: { padding: 16, borderRadius: 18, borderWidth: 1, marginBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  alertBannerText: { fontWeight: '800', fontSize: 14 },
-  alertBannerSub: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
-  searchInput: { borderWidth: 1.5, borderRadius: 15, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, marginBottom: 20 },
-  listContainer: { gap: 12 },
-  itemCard: { borderRadius: 18, padding: 16, borderLeftWidth: 6, borderWidth: 1 },
-  itemHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  itemName: { fontSize: 18, fontWeight: '800' },
-  qtyRow: { flexDirection: 'row', alignItems: 'baseline' },
-  itemQty: { fontSize: 16, fontWeight: '700', marginTop: 2 },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignSelf: 'flex-start' },
-  statusBadgeText: { fontSize: 10, fontWeight: '900' },
-  controlsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  btnQty: { width: 45, height: 45, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  btnText: { fontSize: 20, fontWeight: 'bold' },
-  qtyInput: { flex: 1, borderWidth: 1.5, borderRadius: 12, height: 45, textAlign: 'center', fontSize: 18, fontWeight: '800' },
-  emptyState: { padding: 40, alignItems: 'center' }
+  headerContainer: { padding: 20, paddingBottom: 0 },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  title: { fontSize: 32, fontWeight: '900', letterSpacing: -1 },
+  addButton: { paddingHorizontal: 15, paddingVertical: 10, borderRadius: 12 },
+  addButtonText: { color: '#fff', fontWeight: '900', fontSize: 11 },
+  tabsRow: { flexDirection: 'row', gap: 20 },
+  tab: { paddingVertical: 10 },
+  tabText: { fontWeight: '800', fontSize: 13, textTransform: 'uppercase' },
+  scrollPadding: { padding: 20 },
+  alertBanner: { padding: 12, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#ef4444' },
+  searchInput: { borderWidth: 1.5, borderRadius: 15, padding: 14, marginBottom: 20, fontSize: 16 },
+  listContainer: { gap: 15 },
+  itemCard: { borderRadius: 18, padding: 18, borderLeftWidth: 8, borderWidth: 1, elevation: 2 },
+  itemHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
+  itemName: { fontSize: 19, fontWeight: '900' },
+  controlsRow: { flexDirection: 'row', gap: 12, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.03)', padding: 8, borderRadius: 12 },
+  btnQty: { width: 45, height: 45, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  qtyInput: { flex: 1, borderWidth: 1, borderRadius: 12, textAlign: 'center', height: 45, fontWeight: '900', fontSize: 18, backgroundColor: '#fff' },
+  recetteContainer: { flex: 1, padding: 20 },
+  recetteSplit: { flexDirection: 'row', gap: 15, flex: 1 },
+  sectionLabel: { fontSize: 11, fontWeight: '900', opacity: 0.6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  menuItemMini: { padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 8 },
+  recetteDetail: { flex: 1.6, borderRadius: 18, borderWidth: 1, padding: 15 },
+  centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  recipeRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.05)' },
+  miniAddBtn: { padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 20 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
+  modalContent: { borderRadius: 24, padding: 24, elevation: 5 },
+  modalTitle: { fontSize: 22, fontWeight: '900', marginBottom: 20 },
+  input: { borderWidth: 1.5, borderRadius: 12, padding: 14, fontSize: 16, marginBottom: 10 },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 20, alignItems: 'center', marginTop: 25 },
+  saveBtn: { paddingHorizontal: 20, paddingVertical: 14, borderRadius: 12 },
+  stockOption: { padding: 12, borderRadius: 12, marginBottom: 8 }
 });

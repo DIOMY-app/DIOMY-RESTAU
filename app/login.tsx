@@ -1,7 +1,7 @@
 /**
  * Login Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/login.tsx
- * Version : Stabilisée avec mapping 'telephone' et 'nom'
+ * Correction : Alignement des colonnes (actif au lieu de est_actif)
  */
 
 import React, { useState } from 'react';
@@ -45,7 +45,7 @@ export default function LoginScreen() {
     setIsLoading(true);
 
     try {
-      // 1. Recherche de l'employé (Utilisation de maybeSingle pour éviter le crash si non trouvé)
+      // 1. Recherche de l'employé
       const { data: employee, error: dbError } = await supabase
         .from('employes')
         .select('*')
@@ -58,8 +58,8 @@ export default function LoginScreen() {
         return;
       }
 
-      // 2. Vérification du statut du compte
-      if (!employee.est_actif) {
+      // 2. Vérification du statut du compte (CORRIGÉ : 'actif' au lieu de 'est_actif')
+      if (employee.actif === false) {
         setError('Ce compte est désactivé. Contactez la direction.');
         setIsLoading(false);
         return;
@@ -73,7 +73,6 @@ export default function LoginScreen() {
       }
       
       // 4. Mise à jour du contexte global
-      // Alignement strict avec types.ts : telephone et nom
       dispatch({
         type: 'SET_USER',
         payload: {
@@ -86,7 +85,7 @@ export default function LoginScreen() {
         },
       });
 
-      // 5. Redirection vers l'accueil (tabs)
+      // 5. Redirection vers l'accueil
       router.replace('/');
       
     } catch (err) {

@@ -1,7 +1,7 @@
 /**
  * HomeScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/index.tsx
- * Correction : Intégration du changement de mot de passe dans le Modal Profil + Protection Session.
+ * Mise à jour : Ajout du service "Analyse" pour la gestion des coûts et rentabilité
  */
 
 import React, { useState, useEffect } from "react";
@@ -9,7 +9,7 @@ import {
   ScrollView, Text, View, TouchableOpacity, StyleSheet, 
   Dimensions, ActivityIndicator, Modal, Alert, TextInput 
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useRootNavigationState } from "expo-router";
 
 import { ScreenContainer } from "../components/screen-container";
 import { useApp } from "../app-context";
@@ -62,6 +62,14 @@ const QUICK_ACTIONS: QuickAction[] = [
     allowedRoles: ['admin', 'manager', 'staff'] 
   },
   { 
+    id: '6', // Nouveau : Analyse de rentabilité (Gaz, Loyer, Marges)
+    label: 'Analyse', 
+    icon: '⚖️', 
+    route: 'AdminRentabilite', 
+    color: '#6366F1',
+    allowedRoles: ['admin', 'manager'] 
+  },
+  { 
     id: '5', 
     label: 'Équipe', 
     icon: '👥', 
@@ -73,27 +81,28 @@ const QUICK_ACTIONS: QuickAction[] = [
 
 export default function HomeScreen() {
   const router = useRouter();
+  const rootNavigationState = useRootNavigationState(); 
   const colors = useColors();
   const { state, dispatch } = useApp();
   
   const [isProfileVisible, setIsProfileVisible] = useState(false);
   
-  // États pour le changement de mot de passe (dans le modal)
   const [showPwdFields, setShowPwdFields] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
+    if (!rootNavigationState?.key) return;
     if (state && state.user === null) {
       router.replace('/login');
     }
-  }, [state?.user]);
+  }, [state?.user, rootNavigationState?.key]);
 
-  if (!state || !state.user) {
+  if (!rootNavigationState?.key || !state || !state.user) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
         <ActivityIndicator size="large" color="#8B6F47" />
-        <Text style={{ marginTop: 10, color: '#666' }}>Vérification de la session...</Text>
+        <Text style={{ marginTop: 10, color: '#666' }}>Initialisation de l'application...</Text>
       </View>
     );
   }
@@ -260,7 +269,6 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      {/* MODAL PROFIL AMÉLIORÉ */}
       <Modal visible={isProfileVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
@@ -286,7 +294,6 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            {/* SECTION SÉCURITÉ / MOT DE PASSE */}
             <View style={{ marginBottom: 20 }}>
                 <TouchableOpacity 
                     onPress={() => setShowPwdFields(!showPwdFields)}

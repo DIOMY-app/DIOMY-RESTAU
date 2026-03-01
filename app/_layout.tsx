@@ -2,6 +2,7 @@
  * Root Layout - O'PIED DU MONT Mobile
  * Emplacement : /app/_layout.tsx
  * Gère l'initialisation globale et la structure des Providers
+ * Version : Ajout du chargement des données de rentabilité et charges fixes
  */
 
 import { useEffect, useState } from 'react';
@@ -32,20 +33,25 @@ function AppInitializer() {
         dispatch({ type: 'SET_LOADING', payload: true });
 
         // Chargement des données essentielles depuis Supabase
+        // Ajout des tables de charges et rentabilité pour le Tchiep et autres plats
         const [
           { data: categories, error: catError },
           { data: menu, error: menuError },
           { data: stock, error: stockError },
-          { data: employes, error: empError }
+          { data: employes, error: empError },
+          { data: charges, error: chargesError },
+          { data: rentabilite, error: rentError }
         ] = await Promise.all([
           supabase.from('categories').select('*').order('nom'),
           supabase.from('menu').select('*').order('nom'),
           supabase.from('stock').select('*').order('nom'),
-          supabase.from('employes').select('*').order('nom')
+          supabase.from('employes').select('*').order('nom'),
+          supabase.from('charges_fixes').select('*'),
+          supabase.from('rentabilite_plats').select('*')
         ]);
 
-        if (catError || menuError || stockError || empError) {
-          console.warn("Certaines données n'ont pas pu être chargées, vérifiez la connexion.");
+        if (catError || menuError || stockError || empError || chargesError || rentError) {
+          console.warn("Certaines données n'ont pas pu être chargées, vérifiez la connexion ou les tables SQL.");
         }
 
         dispatch({
@@ -54,7 +60,10 @@ function AppInitializer() {
             categories: categories || [],
             menuItems: menu || [],
             stockItems: stock || [],
-            employees: employes || []
+            employees: employes || [],
+            // On peut ajouter ces données au state global si ton Reducer est prêt
+            chargesFixes: charges || [],
+            rentabilitePlats: rentabilite || []
           }
         });
 
@@ -71,11 +80,14 @@ function AppInitializer() {
 
     loadInitialData();
 
-    // Gestion du temps réel pour le stock
+    // Gestion du temps réel pour le stock et les charges
     const stockSubscription = supabase
-      .channel('stock-changes')
+      .channel('db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock' }, () => {
-        // Optionnel : rafraîchir ici
+        // Rafraîchir si nécessaire
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'charges_fixes' }, () => {
+        // Rafraîchir les charges en temps réel
       })
       .subscribe();
 

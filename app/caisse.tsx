@@ -1,7 +1,7 @@
 /**
  * CaisseScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/caisse.tsx
- * Mise à jour : Liaison Transactions <-> Clients pour statistiques avancées
+ * Version Intégrale : Multi-Clients + WhatsApp + CRM Clients
  */
 
 import React, { useState, useEffect } from 'react';
@@ -35,9 +35,11 @@ export default function CaisseScreen() {
   const [isPinVisible, setIsPinVisible] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('Tous');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('especes');
-  
-  // État pour la capture marketing du client
   const [clientPhone, setClientPhone] = useState('');
+
+  // Gestion Multi-Paniers
+  const activeTab = state.activeTab ?? 0;
+  const currentCart = state.carts[activeTab] || [];
 
   useEffect(() => {
     refreshAppData(dispatch);
@@ -49,7 +51,19 @@ export default function CaisseScreen() {
     return selectedCategory === 'Tous' || item.category === selectedCategory;
   });
   
-  const cartTotal = state.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const cartTotal = currentCart.reduce((sum, item) => {
+    const price = item.price || 0;
+    const qty = item.quantity || 0;
+    return sum + (price * qty);
+  }, 0);
+
+  const safeFormatPrice = (val: number) => {
+    try {
+      return formatPrice(val);
+    } catch (e) {
+      return `${val} FCFA`;
+    }
+  };
 
   const handleAddItem = (item: MenuItem) => {
     dispatch({
@@ -58,7 +72,7 @@ export default function CaisseScreen() {
         id: `${item.id}-${Date.now()}`,
         menuItemId: item.id,
         name: item.name,
-        price: item.price,
+        price: item.price || 0,
         quantity: 1,
       },
     });
@@ -72,20 +86,23 @@ export default function CaisseScreen() {
     }
   };
 
-  const sendWhatsAppReceipt = (transactionId: string, phone: string) => {
-    const dateStr = new Date().toLocaleString('fr-FR');
+  const sendWhatsAppReceipt = (transactionId: string | number, phone: string) => {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0]; 
+    const safeId = transactionId ? transactionId.toString().slice(-6).toUpperCase() : '000000';
+
     let message = `*🏔️ O'PIED DU MONT 🍴*\n_L'excellence à Korhogo_\n`;
     message += `--------------------------\n`;
-    message += `*REÇU #${transactionId.toString().slice(-6).toUpperCase()}*\n`;
+    message += `*REÇU #${safeId}*\n`;
     message += `📅 ${dateStr}\n`;
     message += `💳 PAIEMENT : ${paymentMethod.toUpperCase()}\n`;
     message += `--------------------------\n\n`;
 
-    state.cart.forEach(item => {
-      message += `• ${item.quantity}x ${item.name} : ${formatPrice(item.price * item.quantity)}\n`;
+    currentCart.forEach(item => {
+      message += `• ${item.quantity}x ${item.name} : ${safeFormatPrice(item.price * item.quantity)}\n`;
     });
 
-    message += `\n*TOTAL : ${formatPrice(cartTotal)}*\n`;
+    message += `\n*TOTAL : ${safeFormatPrice(cartTotal)}*\n`;
     message += `--------------------------\n`;
     message += `Merci de votre confiance ! À bientôt.`;
 
@@ -105,7 +122,7 @@ export default function CaisseScreen() {
     setIsSubmitting(true);
     
     try {
-      const itemsForSql = state.cart.map(item => ({
+      const itemsForSql = currentCart.map(item => ({
         nom: item.name,
         quantite: item.quantity,
         prix_unitaire: item.price
@@ -113,27 +130,22 @@ export default function CaisseScreen() {
 
       let linkedClientId = null;
 
-      // 1. LOGIQUE MARKETING & RÉCUPÉRATION ID CLIENT
+      // CRM : Gestion du client
       if (clientPhone.trim().length >= 8) {
         const cleanPhone = clientPhone.replace(/\s/g, '');
-        
-        // On récupère l'ID du client (nouveau ou existant grâce au téléphone UNIQUE)
         const { data: clientData, error: clientError } = await supabase
           .from('clients')
           .upsert({ 
             telephone: cleanPhone, 
             derniere_visite: new Date().toISOString(),
-            nom: 'Client Passager' // Valeur par défaut si nouveau
+            nom: 'Client Passager' 
           }, { onConflict: 'telephone' })
           .select('id')
           .single();
 
-        if (!clientError && clientData) {
-          linkedClientId = clientData.id;
-        }
+        if (!clientError && clientData) linkedClientId = clientData.id;
       }
 
-      // 2. ENREGISTREMENT DE LA TRANSACTION LIÉE
       const { data: transactionData, error: transactionError } = await supabase
         .from('transactions')
         .insert([{
@@ -143,7 +155,7 @@ export default function CaisseScreen() {
           items: itemsForSql, 
           caissier: employeeName,
           client_contact: clientPhone, 
-          client_id: linkedClientId, // Liaison SQL
+          client_id: linkedClientId,
           creee_a: new Date().toISOString(),
           payee_a: new Date().toISOString()
         }])
@@ -151,10 +163,10 @@ export default function CaisseScreen() {
 
       if (transactionError) throw transactionError;
 
-      // 3. Mise à jour des stocks et cuisine 
+      // Déduction stock et envoi cuisine
       await Promise.allSettled([
-        deductStockFromOrder(state.cart),
-        sendToKitchen(transactionData.id, null, state.cart)
+        deductStockFromOrder(currentCart),
+        sendToKitchen(transactionData.id, null, currentCart)
       ]);
 
       const tId = transactionData.id;
@@ -198,16 +210,13 @@ export default function CaisseScreen() {
       />
 
       <View style={styles.mainContainer}>
+        {/* SECTION GAUCHE : MENU */}
         <View style={styles.menuSection}>
           <View style={styles.headerRow}>
-            <Image 
-              source={require('../assets/logo.png')} 
-              style={styles.logoApp}
-              resizeMode="contain"
-            />
+            <Image source={require('../assets/logo.png')} style={styles.logoApp} resizeMode="contain" />
             <View>
               <Text style={[styles.title, { color: colors.foreground }]}>{RESTAURANT_INFO.name}</Text>
-              <Text style={{ color: colors.muted, fontSize: 12 }}>Korhogo • Caisse Mobile</Text>
+              <Text style={{ color: colors.muted, fontSize: 12 }}>Korhogo • Multi-Clients Actifs</Text>
             </View>
           </View>
           
@@ -242,7 +251,7 @@ export default function CaisseScreen() {
                   {item.name}
                 </Text>
                 <Text style={{ color: colors.primary, fontWeight: '900', fontSize: 16 }}>
-                  {formatPrice(item.price)}
+                  {safeFormatPrice(item.price)}
                 </Text>
               </TouchableOpacity>
             )}
@@ -250,21 +259,43 @@ export default function CaisseScreen() {
           />
         </View>
 
+        {/* SECTION DROITE : PANIER MULTI-CLIENTS */}
         <View style={[styles.cartSidebar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          
+          {/* SÉLECTEUR DE CLIENT (ONGLETS) */}
+          <View style={styles.tabContainer}>
+            {[0, 1, 2].map(idx => (
+              <TouchableOpacity
+                key={idx}
+                onPress={() => dispatch({ type: 'SET_ACTIVE_TAB', payload: idx })}
+                style={[
+                  styles.tabButton,
+                  activeTab === idx ? { backgroundColor: colors.primary } : { backgroundColor: colors.background },
+                  state.carts[idx]?.length > 0 && activeTab !== idx && { borderBottomColor: '#ef4444', borderBottomWidth: 4 }
+                ]}
+              >
+                <Text style={[styles.tabLabel, { color: activeTab === idx ? 'white' : colors.foreground }]}>
+                  C{idx + 1}
+                </Text>
+                {state.carts[idx]?.length > 0 && <View style={styles.activityDot} />}
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <View style={styles.cartHeader}>
-            <Text style={[styles.cartTitle, { color: colors.foreground }]}>Panier</Text>
+            <Text style={[styles.cartTitle, { color: colors.foreground }]}>Panier Client {activeTab + 1}</Text>
             <TouchableOpacity onPress={() => dispatch({ type: 'CLEAR_CART' })}>
                 <Text style={{ color: '#ef4444', fontWeight: '700' }}>Vider</Text>
             </TouchableOpacity>
           </View>
 
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-            {state.cart.length === 0 ? (
+            {currentCart.length === 0 ? (
                 <View style={styles.emptyCartContainer}>
                     <Text style={[styles.emptyText, { color: colors.muted }]}>Panier vide</Text>
                 </View>
             ) : (
-                state.cart.map(item => (
+                currentCart.map(item => (
                     <View key={item.id} style={[styles.cartItem, { borderBottomColor: colors.border }]}>
                       <Text style={{ color: colors.foreground, fontWeight: '700' }}>{item.name}</Text>
                       <View style={styles.cartItemFooter}>
@@ -283,7 +314,7 @@ export default function CaisseScreen() {
                             <Text style={{ color: 'white' }}>+</Text>
                           </TouchableOpacity>
                         </View>
-                        <Text style={{ color: colors.foreground, fontWeight: '600' }}>{formatPrice(item.price * item.quantity)}</Text>
+                        <Text style={{ color: colors.foreground, fontWeight: '600' }}>{safeFormatPrice(item.price * item.quantity)}</Text>
                       </View>
                     </View>
                 ))
@@ -291,7 +322,7 @@ export default function CaisseScreen() {
           </ScrollView>
 
           <View style={styles.marketingContainer}>
-            <Text style={[styles.marketingLabel, { color: colors.muted }]}>CLIENT (WHATSAPP / MARKETING)</Text>
+            <Text style={[styles.marketingLabel, { color: colors.muted }]}>CONTACT CLIENT (WHATSAPP)</Text>
             <TextInput
               style={[styles.phoneInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
               placeholder="Ex: 0708091011"
@@ -305,7 +336,7 @@ export default function CaisseScreen() {
           <View style={[styles.totalSection, { borderTopColor: colors.border }]}>
             <View style={styles.totalRow}>
               <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '700' }}>TOTAL</Text>
-              <Text style={{ color: colors.primary, fontSize: 24, fontWeight: '900' }}>{formatPrice(cartTotal)}</Text>
+              <Text style={{ color: colors.primary, fontSize: 24, fontWeight: '900' }}>{safeFormatPrice(cartTotal)}</Text>
             </View>
 
             <View style={styles.paymentGrid}>
@@ -324,7 +355,7 @@ export default function CaisseScreen() {
                 >
                   <Text style={{ 
                     color: paymentMethod === m ? 'white' : colors.foreground, 
-                    fontSize: 9, 
+                    fontSize: 8, 
                     fontWeight: '800' 
                   }}>{m.replace('_', ' ').toUpperCase()}</Text>
                 </TouchableOpacity>
@@ -336,13 +367,13 @@ export default function CaisseScreen() {
                 styles.validateBtn, 
                 { 
                     backgroundColor: '#22c55e', 
-                    opacity: (isSubmitting || state.cart.length === 0) ? 0.5 : 1 
+                    opacity: (isSubmitting || currentCart.length === 0) ? 0.5 : 1 
                 }
               ]}
-              onPress={() => { if(state.cart.length > 0) setIsPinVisible(true); }}
-              disabled={isSubmitting || state.cart.length === 0}
+              onPress={() => { if(currentCart.length > 0) setIsPinVisible(true); }}
+              disabled={isSubmitting || currentCart.length === 0}
             >
-              <Text style={{ color: 'white', fontWeight: '900', fontSize: 16 }}>VALIDER LA VENTE</Text>
+              <Text style={{ color: 'white', fontWeight: '900', fontSize: 16 }}>VALIDER (CLIENT {activeTab + 1})</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -364,18 +395,22 @@ const styles = StyleSheet.create({
   menuItemCard: { flex: 0.5, borderRadius: 18, padding: 16, borderWidth: 1.5, marginBottom: 12, justifyContent: 'space-between', height: 110, elevation: 2 },
   menuItemName: { fontWeight: '800', fontSize: 15, lineHeight: 20 },
   cartSidebar: { width: 330, borderRadius: 28, borderWidth: 1.5, padding: 20, elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10 },
+  tabContainer: { flexDirection: 'row', gap: 8, marginBottom: 15 },
+  tabButton: { flex: 1, height: 45, borderRadius: 12, justifyContent: 'center', alignItems: 'center', position: 'relative' },
+  tabLabel: { fontWeight: '900', fontSize: 14 },
+  activityDot: { position: 'absolute', top: 5, right: 5, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
   cartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  cartTitle: { fontSize: 22, fontWeight: '900' },
+  cartTitle: { fontSize: 19, fontWeight: '900' },
   emptyCartContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 60 },
   emptyText: { textAlign: 'center', fontSize: 14, fontWeight: '600' },
   cartItem: { paddingVertical: 14, borderBottomWidth: 1 },
   cartItemFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
   quantityControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   qtyBtn: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  marketingContainer: { marginBottom: 15 },
+  marketingContainer: { marginBottom: 15, marginTop: 10 },
   marketingLabel: { fontSize: 9, fontWeight: '900', marginBottom: 5 },
   phoneInput: { height: 45, borderWidth: 1.5, borderRadius: 12, paddingHorizontal: 12, fontSize: 16, fontWeight: '700' },
-  totalSection: { marginTop: 15, paddingTop: 15, borderTopWidth: 2 },
+  totalSection: { marginTop: 10, paddingTop: 10, borderTopWidth: 2 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   paymentGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 15 },
   paymentBtn: { flex: 1, minWidth: '45%', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },

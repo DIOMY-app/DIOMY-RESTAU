@@ -1,7 +1,7 @@
 /**
  * RapportScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/Rapportscreen.tsx
- * Correction : Ajout du style lockIcon manquant et gestion du Bénéfice Net
+ * Version : Reporting financier complet avec comparaison Ventes vs Versements
  */
 
 import React, { useState, useEffect } from 'react';
@@ -26,12 +26,6 @@ interface TransactionRow {
   creee_a: string;
   montant_total: number;
   mode_paiement: string;
-}
-
-interface DepenseRow {
-  id: number;
-  montant: number;
-  creee_a: string;
 }
 
 interface TopClient {
@@ -60,7 +54,6 @@ export default function RapportScreen() {
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('semaine');
   const [rawTransactions, setRawTransactions] = useState<TransactionRow[]>([]);
   const [topClients, setTopClients] = useState<TopClient[]>([]);
-  const [totalClientsCount, setTotalClientsCount] = useState(0);
   
   const [chartData, setChartData] = useState({
     labels: ["..."],
@@ -68,13 +61,16 @@ export default function RapportScreen() {
   });
 
   const [stats, setStats] = useState({
-    caTotal: 0,
-    depensesTotal: 0,
-    beneficeNet: 0,
+    caTheorique: 0,   // Total calculé par l'app (Transactions)
+    caReel: 0,        // Total réellement versé à la compta (Clôtures)
+    depensesTotal: 0, // Dépenses compta
+    beneficeNet: 0,   // caReel - depensesTotal
+    ecartTotal: 0,    // Somme des écarts de caisse
     nbVentes: 0,
     parPaiement: { especes: 0, wave: 0, orange_money: 0, carte: 0 } as PaymentStats,
   });
 
+  // Vérification stricte des droits
   const isAuthorized = user?.role === 'admin' || user?.role === 'manager';
 
   const fetchData = async () => {
@@ -95,6 +91,7 @@ export default function RapportScreen() {
 
       const isoStart = startDate.toISOString();
 
+      // 1. Récupération des Transactions (Ventes App)
       const { data: txData, error: txError } = await supabase
         .from('transactions') 
         .select('id, creee_a, montant_total, mode_paiement')
@@ -103,51 +100,70 @@ export default function RapportScreen() {
 
       if (txError) throw txError;
 
+      // 2. Récupération des Dépenses
       const { data: expData, error: expError } = await supabase
         .from('depenses')
         .select('id, montant, creee_a')
         .gte('creee_a', isoStart);
 
       if (expError) throw expError;
-      
-      const { data: clientsData } = await supabase.from('vue_fidelite_clients').select('*').limit(5);
-      const { count } = await supabase.from('clients').select('*', { count: 'exact', head: true });
 
+      // 3. Récupération des Versements réels (Clôtures de caisse)
+      const { data: cloData, error: cloError } = await supabase
+        .from('clotures')
+        .select('total_physique, ecart, creee_a')
+        .gte('creee_a', isoStart);
+
+      if (cloError) throw cloError;
+      
+      // 4. Récupération de la fidélité (Vue Supabase)
+      const { data: clientsData } = await supabase
+        .from('vue_fidelite_clients')
+        .select('*')
+        .order('total_depense', { ascending: false })
+        .limit(5);
+        
       setTopClients(clientsData || []);
-      setTotalClientsCount(count || 0);
 
       const allTx: TransactionRow[] = txData || [];
-      const allExp: DepenseRow[] = expData || [];
+      const allExp = expData || [];
+      const allClo = cloData || [];
+      
+      // --- LOGIQUE DE PRÉPARATION DES DONNÉES ---
       
       const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
       const last7DaysMap: Map<string, number> = new Map();
       
+      // Initialiser les 7 derniers jours à 0
       for(let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
         last7DaysMap.set(days[d.getDay()], 0);
       }
 
-      let totalRecettes = 0;
-      let totalDepenses = 0;
+      let totalVentes = 0;
       let paiements: PaymentStats = { especes: 0, wave: 0, orange_money: 0, carte: 0 };
 
       allTx.forEach((t) => {
         const amount = Number(t.montant_total);
-        totalRecettes += amount;
+        totalVentes += amount;
+        
+        // Données pour le graphique
         const tDate = new Date(t.creee_a);
         const dayName = days[tDate.getDay()];
         if (last7DaysMap.has(dayName)) {
           last7DaysMap.set(dayName, (last7DaysMap.get(dayName) || 0) + amount);
         }
+        
+        // Répartition par mode
         const mode = (t.mode_paiement || 'especes').toLowerCase();
         if (mode in paiements) paiements[mode] += amount;
         else paiements.especes += amount;
       });
 
-      allExp.forEach((e) => {
-        totalDepenses += Number(e.montant);
-      });
+      const totalDepenses = allExp.reduce((sum, e) => sum + Number(e.montant), 0);
+      const totalVerse = allClo.reduce((sum, c) => sum + Number(c.total_physique), 0);
+      const sumEcarts = allClo.reduce((sum, c) => sum + Number(c.ecart), 0);
 
       setChartData({
         labels: Array.from(last7DaysMap.keys()),
@@ -155,9 +171,11 @@ export default function RapportScreen() {
       });
 
       setStats({
-        caTotal: totalRecettes,
+        caTheorique: totalVentes,
+        caReel: totalVerse,
         depensesTotal: totalDepenses,
-        beneficeNet: totalRecettes - totalDepenses,
+        beneficeNet: totalVerse - totalDepenses,
+        ecartTotal: sumEcarts,
         nbVentes: allTx.length,
         parPaiement: paiements,
       });
@@ -177,7 +195,7 @@ export default function RapportScreen() {
       rawTransactions.forEach((t) => {
         csvContent += `${t.id};${new Date(t.creee_a).toLocaleString()};${t.montant_total};${t.mode_paiement}\n`;
       });
-      const fileUri = FileSystem.cacheDirectory + `RAPPORT_${selectedPeriod.toUpperCase()}_${new Date().toISOString().split('T')[0]}.csv`;
+      const fileUri = FileSystem.cacheDirectory + `RAPPORT_OPIED_${selectedPeriod.toUpperCase()}.csv`;
       await FileSystem.writeAsStringAsync(fileUri, csvContent);
       await Sharing.shareAsync(fileUri);
     } catch (error) {
@@ -194,6 +212,7 @@ export default function RapportScreen() {
       <ScreenContainer style={styles.center}>
         <Text style={styles.lockIcon}>🔒</Text>
         <Text style={{ color: colors.foreground, fontSize: 18, fontWeight: 'bold' }}>Accès Gérant Uniquement</Text>
+        <Text style={{ color: colors.muted, marginTop: 10 }}>Contactez votre administrateur.</Text>
       </ScreenContainer>
     );
   }
@@ -203,6 +222,7 @@ export default function RapportScreen() {
       <ScrollView 
         style={styles.container}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchData} tintColor={colors.primary} />}
+        showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
           <View>
@@ -217,6 +237,7 @@ export default function RapportScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* FILTRES DE PÉRIODE */}
         <View style={styles.filterContainer}>
           {(['jour', 'semaine', 'mois'] as Period[]).map((p) => (
             <TouchableOpacity 
@@ -237,24 +258,43 @@ export default function RapportScreen() {
           ))}
         </View>
 
+        {/* CARD RÉSUMÉ FINANCIER RÉEL */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={styles.summaryRow}>
             <View style={{ alignItems: 'center', flex: 1 }}>
-              <Text style={styles.cardLabel}>RECETTES (CA)</Text>
-              <Text style={[styles.smallValue, { color: colors.foreground }]}>{formatPrice(stats.caTotal)}</Text>
+              <Text style={styles.cardLabel}>RECETTES (APP)</Text>
+              <Text style={[styles.smallValue, { color: colors.foreground }]}>{formatPrice(stats.caTheorique)}</Text>
             </View>
             <View style={{ alignItems: 'center', flex: 1 }}>
-              <Text style={styles.cardLabel}>DÉPENSES</Text>
-              <Text style={[styles.smallValue, { color: colors.error }]}>-{formatPrice(stats.depensesTotal)}</Text>
+              <Text style={styles.cardLabel}>VERSÉ (RÉEL)</Text>
+              <Text style={[styles.smallValue, { color: colors.success }]}>{formatPrice(stats.caReel)}</Text>
             </View>
           </View>
+          
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <Text style={[styles.cardLabel, { marginTop: 10 }]}>BÉNÉFICE NET ESTIMÉ</Text>
+          
+          <View style={styles.summaryRow}>
+             <View style={{ alignItems: 'center', flex: 1 }}>
+              <Text style={styles.cardLabel}>DÉPENSES COMPTA</Text>
+              <Text style={[styles.smallValue, { color: colors.error }]}>-{formatPrice(stats.depensesTotal)}</Text>
+            </View>
+            <View style={{ alignItems: 'center', flex: 1 }}>
+              <Text style={styles.cardLabel}>ÉCARTS CAISSE</Text>
+              <Text style={[styles.smallValue, { color: stats.ecartTotal < 0 ? colors.error : colors.primary }]}>
+                {formatPrice(stats.ecartTotal)}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          
+          <Text style={[styles.cardLabel, { marginTop: 10 }]}>BÉNÉFICE NET (RÉEL - DÉPENSES)</Text>
           <Text style={[styles.cardValue, { color: stats.beneficeNet >= 0 ? colors.success : colors.error }]}>
             {formatPrice(stats.beneficeNet)}
           </Text>
         </View>
 
+        {/* GRAPHIQUE CA */}
         <View style={styles.chartWrapper}>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Évolution CA (7j)</Text>
           <LineChart
@@ -275,8 +315,9 @@ export default function RapportScreen() {
           />
         </View>
 
+        {/* RÉPARTITION PAIEMENTS */}
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground, marginBottom: 15 }]}>Encaissements par mode</Text>
+          <Text style={[styles.sectionTitle, { color: colors.foreground, marginBottom: 15 }]}>Détail des Ventes (App)</Text>
           {Object.entries(stats.parPaiement).map(([mode, montant]) => (
             <View key={mode} style={[styles.row, { borderBottomColor: colors.border }]}>
               <Text style={styles.label}>{mode.toUpperCase()}</Text>
@@ -285,21 +326,27 @@ export default function RapportScreen() {
           ))}
         </View>
 
+        {/* TOP CLIENTS */}
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground, marginBottom: 15 }]}>🏆 Fidélité Client</Text>
-          {topClients.map((item) => (
+          <Text style={[styles.sectionTitle, { color: colors.foreground, marginBottom: 15 }]}>🏆 Top Clients (Fidélité)</Text>
+          {topClients.length > 0 ? topClients.map((item) => (
             <View key={item.telephone} style={[styles.row, { borderBottomColor: colors.border }]}>
               <View>
-                <Text style={[styles.val, { color: colors.foreground }]}>{item.nom || 'Client'}</Text>
+                <Text style={[styles.val, { color: colors.foreground }]}>{item.nom || 'Client Anonyme'}</Text>
                 <Text style={{ fontSize: 11, color: colors.muted }}>{item.telephone}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={[styles.val, { color: colors.primary }]}>{formatPrice(item.total_depense)}</Text>
-                <Text style={{ fontSize: 11, color: colors.muted }}>{item.nombre_visites} visites</Text>
+                <Text style={{ fontSize: 11, color: colors.muted }}>{item.nombre_visites} commandes</Text>
               </View>
             </View>
-          ))}
+          )) : (
+            <View style={{ paddingVertical: 10 }}>
+              <Text style={{ color: colors.muted, textAlign: 'center' }}>Aucune donnée client pour le moment.</Text>
+            </View>
+          )}
         </View>
+
         <View style={{ height: 50 }} />
       </ScrollView>
     </ScreenContainer>
@@ -308,8 +355,8 @@ export default function RapportScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  lockIcon: { fontSize: 60, marginBottom: 20 }, // <-- AJOUTÉ ICI
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  lockIcon: { fontSize: 60, marginBottom: 20 },
   header: { marginTop: 10, marginBottom: 25, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { fontSize: 28, fontWeight: '900', letterSpacing: -1 },
   dateSub: { fontSize: 13, fontWeight: '600' },
@@ -321,11 +368,11 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 17, fontWeight: '800' },
   chart: { borderRadius: 20, marginTop: 15, paddingRight: 40 },
   card: { padding: 20, borderRadius: 24, borderWidth: 1, alignItems: 'center', marginBottom: 25 },
-  summaryRow: { flexDirection: 'row', width: '100%', marginBottom: 10 },
-  divider: { height: 1, width: '80%', marginVertical: 5 },
+  summaryRow: { flexDirection: 'row', width: '100%', marginVertical: 5 },
+  divider: { height: 1, width: '80%', marginVertical: 10 },
   cardLabel: { fontSize: 9, color: '#888', fontWeight: '900', letterSpacing: 1 },
   cardValue: { fontSize: 28, fontWeight: '900', marginVertical: 5 },
-  smallValue: { fontSize: 16, fontWeight: '800' },
+  smallValue: { fontSize: 15, fontWeight: '800' },
   section: { padding: 20, borderRadius: 24, borderWidth: 1, marginBottom: 20 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1 },
   label: { color: '#888', fontSize: 11, fontWeight: '800' },
