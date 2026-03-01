@@ -51,7 +51,7 @@ const config: ExpoConfig = {
           minSdkVersion: 24,
           compileSdkVersion: 34,
           targetSdkVersion: 34,
-          // On force une version de Kotlin ultra-stable
+          // VERROU CRITIQUE : Force la version stable testée par Expo pour le SDK 51
           kotlinVersion: "1.8.10",
           enableProguardInReleaseBuilds: true
         }
