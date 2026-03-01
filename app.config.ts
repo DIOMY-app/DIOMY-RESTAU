@@ -51,10 +51,9 @@ const config: ExpoConfig = {
           minSdkVersion: 24,
           compileSdkVersion: 34,
           targetSdkVersion: 34,
-          // FORCE la version Kotlin pour corriger l'erreur ExpoLinkingModule
+          // On force une version de Kotlin ultra-stable
           kotlinVersion: "1.8.10",
-          enableProguardInReleaseBuilds: true,
-          extraMavenRepos: ["https://www.jitpack.io"]
+          enableProguardInReleaseBuilds: true
         }
       }
     ]
