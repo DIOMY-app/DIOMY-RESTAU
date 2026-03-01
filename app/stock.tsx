@@ -1,7 +1,7 @@
 /**
  * Stock Management Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/stocks.tsx
- * Version : Gestion Inventaire + Recettes + Alertes Visuelles Renforcées
+ * Version : Inventaire Dimanche + Déclaration Pertes + Recettes
  */
 
 import React, { useState, useEffect } from 'react';
@@ -35,8 +35,11 @@ export default function StockScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeMode, setActiveMode] = useState<'inventaire' | 'recettes'>('inventaire');
 
-  // États Inventaire (Ajout)
+  // États Inventaire & Pertes
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+  const [isLossModalVisible, setIsLossModalVisible] = useState(false);
+  const [selectedItemForLoss, setSelectedItemForLoss] = useState<StockItem | null>(null);
+  const [lossQty, setLossQty] = useState('');
   const [newItem, setNewItem] = useState({ name: '', quantity: '0', minQuantity: '5', unit: 'pcs' });
 
   // États Recettes
@@ -55,7 +58,6 @@ export default function StockScreen() {
     loadData();
   }, []);
 
-  // Charger la recette quand on change de plat
   useEffect(() => {
     if (selectedMenuItem && activeMode === 'recettes') {
       loadRecipe(selectedMenuItem.id);
@@ -74,7 +76,7 @@ export default function StockScreen() {
     setRefreshing(false);
   };
 
-  // --- LOGIQUE INVENTAIRE ---
+  // --- LOGIQUE INVENTAIRE & PERTES ---
 
   const handleCreateItem = async () => {
     if (!newItem.name) return Alert.alert("Erreur", "Le nom est obligatoire");
@@ -113,6 +115,46 @@ export default function StockScreen() {
     } catch (error: any) {
       Alert.alert("Erreur sync", error.message);
     }
+  };
+
+  const handleDeclareLoss = async () => {
+    if (!selectedItemForLoss || !lossQty) return;
+    const qtyToSubtract = parseFloat(lossQty.replace(',', '.'));
+    const finalQty = Math.max(0, selectedItemForLoss.quantity - qtyToSubtract);
+
+    try {
+      setLoading(true);
+      // 1. Mettre à jour le stock
+      const { error } = await supabase
+        .from('stock')
+        .update({ quantite: finalQty })
+        .eq('id', parseInt(selectedItemForLoss.id));
+      
+      if (error) throw error;
+
+      // 2. Optionnel: Log de la perte dans une table 'stock_logs' si elle existe
+      // await supabase.from('stock_logs').insert([{ item_id: selectedItemForLoss.id, type: 'perte', quantite: qtyToSubtract }]);
+
+      setIsLossModalVisible(false);
+      setLossQty('');
+      await refreshAppData(dispatch);
+      Alert.alert("Perte enregistrée", `${qtyToSubtract} ${selectedItemForLoss.unit} déduits.`);
+    } catch (error: any) {
+      Alert.alert("Erreur", error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFullInventory = () => {
+    Alert.alert(
+      "Inventaire Complet",
+      "Voulez-vous lancer la procédure de mise à jour manuelle pour tous les articles ?",
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Lancer", onPress: () => Alert.alert("Info", "Modifiez simplement les chiffres dans la liste, la sauvegarde est automatique.") }
+      ]
+    );
   };
 
   // --- LOGIQUE RECETTES ---
@@ -172,12 +214,20 @@ export default function StockScreen() {
         <View style={styles.headerTop}>
           <Text style={[styles.title, { color: colors.foreground }]}>Stocks</Text>
           {isAdmin && activeMode === 'inventaire' && (
-            <TouchableOpacity 
-              style={[styles.addButton, { backgroundColor: colors.primary }]} 
-              onPress={() => setIsAddModalVisible(true)}
-            >
-              <Text style={styles.addButtonText}>+ ARRIVAGE</Text>
-            </TouchableOpacity>
+            <View style={{flexDirection: 'row', gap: 8}}>
+               <TouchableOpacity 
+                style={[styles.addButton, { backgroundColor: colors.border }]} 
+                onPress={handleFullInventory}
+              >
+                <Text style={[styles.addButtonText, {color: colors.foreground}]}>📋 INVENTAIRE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.addButton, { backgroundColor: colors.primary }]} 
+                onPress={() => setIsAddModalVisible(true)}
+              >
+                <Text style={styles.addButtonText}>+ ARRIVAGE</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -186,7 +236,7 @@ export default function StockScreen() {
             <Text style={[styles.tabText, { color: activeMode === 'inventaire' ? colors.primary : colors.muted }]}>Inventaire</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setActiveMode('recettes')} style={[styles.tab, activeMode === 'recettes' && { borderBottomColor: colors.primary, borderBottomWidth: 3 }]}>
-            <Text style={[styles.tabText, { color: activeMode === 'recettes' ? colors.primary : colors.muted }]}>Configuration Recettes</Text>
+            <Text style={[styles.tabText, { color: activeMode === 'recettes' ? colors.primary : colors.muted }]}>Recettes</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -250,6 +300,17 @@ export default function StockScreen() {
                       >
                         <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>+</Text>
                       </TouchableOpacity>
+                      
+                      {/* BOUTON PERTE */}
+                      <TouchableOpacity 
+                        style={[styles.btnLoss, { borderColor: '#ef4444' }]} 
+                        onPress={() => {
+                            setSelectedItemForLoss(item);
+                            setIsLossModalVisible(true);
+                        }}
+                      >
+                        <Text style={{ color: '#ef4444', fontSize: 10, fontWeight: 'bold' }}>PERTE</Text>
+                      </TouchableOpacity>
                     </View>
                   )}
                 </View>
@@ -259,7 +320,7 @@ export default function StockScreen() {
         </ScrollView>
       ) : (
         <View style={styles.recetteContainer}>
-          <Text style={[styles.sectionLabel, { marginBottom: 15 }]}>Associer des ingrédients aux plats pour le déstockage auto</Text>
+          <Text style={[styles.sectionLabel, { marginBottom: 15 }]}>Lien auto Plats ↔ Ingrédients</Text>
           <View style={styles.recetteSplit}>
             <View style={{ flex: 1 }}>
               <FlatList
@@ -278,7 +339,7 @@ export default function StockScreen() {
             <View style={[styles.recetteDetail, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               {selectedMenuItem ? (
                 <>
-                  <Text style={{ color: colors.foreground, fontWeight: '800', marginBottom: 10 }}>Ingrédients pour :{"\n"}{selectedMenuItem.name}</Text>
+                  <Text style={{ color: colors.foreground, fontWeight: '800', marginBottom: 10 }}>{selectedMenuItem.name}</Text>
                   {recipeItems.length > 0 ? recipeItems.map(ri => (
                     <View key={ri.id} style={styles.recipeRow}>
                       <Text style={{ flex: 1, fontSize: 12, color: colors.foreground }}>{ri.stock_name}</Text>
@@ -291,12 +352,12 @@ export default function StockScreen() {
                     <Text style={{ color: colors.muted, fontSize: 11, fontStyle: 'italic', marginVertical: 10 }}>Aucun ingrédient lié.</Text>
                   )}
                   <TouchableOpacity style={[styles.miniAddBtn, { backgroundColor: colors.primary }]} onPress={() => setIsRecipeModalVisible(true)}>
-                    <Text style={{ color: 'white', fontSize: 11, fontWeight: 'bold' }}>+ AJOUTER INGRÉDIENT</Text>
+                    <Text style={{ color: 'white', fontSize: 11, fontWeight: 'bold' }}>+ LIER</Text>
                   </TouchableOpacity>
                 </>
               ) : (
                 <View style={styles.centerContent}>
-                  <Text style={{ color: colors.muted, textAlign: 'center' }}>Sélectionnez un plat à gauche pour configurer sa recette</Text>
+                  <Text style={{ color: colors.muted, textAlign: 'center', fontSize: 12 }}>Sélectionnez un plat</Text>
                 </View>
               )}
             </View>
@@ -304,31 +365,52 @@ export default function StockScreen() {
         </View>
       )}
 
-      {/* MODAL AJOUT ARTICLE STOCK */}
+      {/* MODAL AJOUT ARTICLE */}
       <Modal visible={isAddModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Nouvel Ingrédient / Arrivage</Text>
-            <TextInput style={[styles.input, { color: colors.foreground, borderColor: colors.border }]} placeholder="Nom (ex: Sac de Riz 50kg)" value={newItem.name} onChangeText={(v) => setNewItem({...newItem, name: v})} />
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Nouvel Arrivage</Text>
+            <TextInput style={[styles.input, { color: colors.foreground, borderColor: colors.border }]} placeholder="Nom (ex: Sac de Riz)" value={newItem.name} onChangeText={(v) => setNewItem({...newItem, name: v})} />
             <View style={{ flexDirection: 'row', gap: 10, marginVertical: 10 }}>
               <TextInput style={[styles.input, { flex: 1, color: colors.foreground, borderColor: colors.border }]} placeholder="Qté initiale" keyboardType="numeric" value={newItem.quantity} onChangeText={(v) => setNewItem({...newItem, quantity: v})} />
-              <TextInput style={[styles.input, { flex: 1, color: colors.foreground, borderColor: colors.border }]} placeholder="Unité (kg, l, pcs)" value={newItem.unit} onChangeText={(v) => setNewItem({...newItem, unit: v})} />
+              <TextInput style={[styles.input, { flex: 1, color: colors.foreground, borderColor: colors.border }]} placeholder="Unité (kg, l)" value={newItem.unit} onChangeText={(v) => setNewItem({...newItem, unit: v})} />
             </View>
-            <TextInput style={[styles.input, { color: colors.foreground, borderColor: colors.border }]} placeholder="Seuil d'alerte (Stock mini)" keyboardType="numeric" value={newItem.minQuantity} onChangeText={(v) => setNewItem({...newItem, minQuantity: v})} />
+            <TextInput style={[styles.input, { color: colors.foreground, borderColor: colors.border }]} placeholder="Seuil d'alerte" keyboardType="numeric" value={newItem.minQuantity} onChangeText={(v) => setNewItem({...newItem, minQuantity: v})} />
             <View style={styles.modalActions}>
               <TouchableOpacity onPress={() => setIsAddModalVisible(false)}><Text style={{ color: colors.muted, fontWeight: '600' }}>ANNULER</Text></TouchableOpacity>
-              <TouchableOpacity onPress={handleCreateItem} style={[styles.saveBtn, { backgroundColor: colors.primary }]}><Text style={{ color: '#fff', fontWeight: '800' }}>CRÉER L'ARTICLE</Text></TouchableOpacity>
+              <TouchableOpacity onPress={handleCreateItem} style={[styles.saveBtn, { backgroundColor: colors.primary }]}><Text style={{ color: '#fff', fontWeight: '800' }}>CRÉER</Text></TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* MODAL LIER RECETTE */}
+      {/* MODAL DECLARATION PERTE */}
+      <Modal visible={isLossModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: '#ef4444' }]}>Déclarer une Perte</Text>
+            <Text style={{color: colors.foreground, marginBottom: 15}}>Article : {selectedItemForLoss?.name}</Text>
+            <TextInput 
+                style={[styles.input, { color: colors.foreground, borderColor: '#ef4444' }]} 
+                placeholder={`Qté perdue (${selectedItemForLoss?.unit})`} 
+                keyboardType="numeric" 
+                value={lossQty} 
+                onChangeText={setLossQty} 
+                autoFocus
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setIsLossModalVisible(false)}><Text style={{ color: colors.muted, fontWeight: '600' }}>ANNULER</Text></TouchableOpacity>
+              <TouchableOpacity onPress={handleDeclareLoss} style={[styles.saveBtn, { backgroundColor: '#ef4444' }]}><Text style={{ color: '#fff', fontWeight: '800' }}>DÉDUIRE DU STOCK</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL LIER RECETTE (Inchangé mais conservé pour cohérence) */}
       <Modal visible={isRecipeModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <Text style={{ fontWeight: '900', fontSize: 18, color: colors.foreground, marginBottom: 15 }}>Lier un ingrédient</Text>
-            <Text style={{ fontSize: 12, color: colors.muted, marginBottom: 10 }}>Sélectionnez l'élément de stock à déduire :</Text>
             <ScrollView style={{ maxHeight: 250 }}>
               {stockItems.map((s: StockItem) => (
                 <TouchableOpacity 
@@ -343,14 +425,14 @@ export default function StockScreen() {
             </ScrollView>
             <TextInput 
               style={[styles.input, { marginTop: 15, color: colors.foreground, borderColor: colors.border }]} 
-              placeholder="Quantité utilisée par plat (ex: 0.2)" 
+              placeholder="Qté par plat (ex: 0.2)" 
               keyboardType="numeric" 
               value={qtyToConsume} 
               onChangeText={setQtyToConsume} 
             />
             <View style={styles.modalActions}>
               <TouchableOpacity onPress={() => setIsRecipeModalVisible(false)}><Text style={{ color: colors.muted, fontWeight: '600' }}>ANNULER</Text></TouchableOpacity>
-              <TouchableOpacity onPress={handleAddIngredient} style={[styles.saveBtn, { backgroundColor: colors.success }]}><Text style={{ color: 'white', fontWeight: '800' }}>LIER À LA RECETTE</Text></TouchableOpacity>
+              <TouchableOpacity onPress={handleAddIngredient} style={[styles.saveBtn, { backgroundColor: colors.primary }]}><Text style={{ color: 'white', fontWeight: '800' }}>LIER</Text></TouchableOpacity>
             </View>
           </View>
         </View>
@@ -363,8 +445,8 @@ const styles = StyleSheet.create({
   headerContainer: { padding: 20, paddingBottom: 0 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   title: { fontSize: 32, fontWeight: '900', letterSpacing: -1 },
-  addButton: { paddingHorizontal: 15, paddingVertical: 10, borderRadius: 12 },
-  addButtonText: { color: '#fff', fontWeight: '900', fontSize: 11 },
+  addButton: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  addButtonText: { color: '#fff', fontWeight: '900', fontSize: 10 },
   tabsRow: { flexDirection: 'row', gap: 20 },
   tab: { paddingVertical: 10 },
   tabText: { fontWeight: '800', fontSize: 13, textTransform: 'uppercase' },
@@ -375,12 +457,13 @@ const styles = StyleSheet.create({
   itemCard: { borderRadius: 18, padding: 18, borderLeftWidth: 8, borderWidth: 1, elevation: 2 },
   itemHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   itemName: { fontSize: 19, fontWeight: '900' },
-  controlsRow: { flexDirection: 'row', gap: 12, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.03)', padding: 8, borderRadius: 12 },
-  btnQty: { width: 45, height: 45, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  qtyInput: { flex: 1, borderWidth: 1, borderRadius: 12, textAlign: 'center', height: 45, fontWeight: '900', fontSize: 18, backgroundColor: '#fff' },
+  controlsRow: { flexDirection: 'row', gap: 10, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.03)', padding: 8, borderRadius: 12 },
+  btnQty: { width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  btnLoss: { paddingHorizontal: 10, height: 40, borderRadius: 10, borderWidth: 1.5, justifyContent: 'center', alignItems: 'center' },
+  qtyInput: { flex: 1, borderWidth: 1, borderRadius: 10, textAlign: 'center', height: 40, fontWeight: '900', fontSize: 16, backgroundColor: '#fff' },
   recetteContainer: { flex: 1, padding: 20 },
   recetteSplit: { flexDirection: 'row', gap: 15, flex: 1 },
-  sectionLabel: { fontSize: 11, fontWeight: '900', opacity: 0.6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionLabel: { fontSize: 11, fontWeight: '900', opacity: 0.6, textTransform: 'uppercase' },
   menuItemMini: { padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 8 },
   recetteDetail: { flex: 1.6, borderRadius: 18, borderWidth: 1, padding: 15 },
   centerContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },

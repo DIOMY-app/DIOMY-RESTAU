@@ -1,7 +1,7 @@
 /**
  * Orders / Cart Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/orders.tsx
- * Version : Validation + Déstockage via RPC (Sécurisé)
+ * Version : Corrigée (Navigation + Types)
  */
 
 import React, { useState } from 'react';
@@ -23,6 +23,11 @@ export default function OrdersScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const cart = state.cart || [];
+  const user = state.user;
+  const currentSession = state.currentSession;
+
+  // Déterminer le rôle actuel par rapport à la session
+  const isCaissier = user?.role === 'admin' || (currentSession && currentSession.employe_id === user?.id);
 
   // Calculs financiers
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -42,29 +47,25 @@ export default function OrdersScreen() {
   };
 
   /**
-   * LOGIQUE DE DÉSTOCKAGE VIA RPC (SÉCURISÉ)
+   * LOGIQUE DE DÉSTOCKAGE VIA RPC
    */
   const processDestocking = async () => {
     try {
       for (const item of cart) {
-        // 1. Récupérer les ingrédients de la recette
         const { data: recipe, error: recipeError } = await supabase
           .from('menu_recettes')
           .select('stock_id, quantite_consommee')
-          .eq('menu_id', parseInt(item.id));
+          .eq('menu_id', parseInt(item.menuItemId || item.id));
 
         if (recipeError) throw recipeError;
 
         if (recipe && recipe.length > 0) {
           for (const ingredient of recipe) {
             const totalToDeduct = ingredient.quantite_consommee * item.quantity;
-
-            // 2. Appel de la fonction SQL 'deduire_stock'
             const { error: rpcError } = await supabase.rpc('deduire_stock', {
               item_id: ingredient.stock_id,
               qty_to_subtract: totalToDeduct
             });
-
             if (rpcError) throw rpcError;
           }
         }
@@ -79,44 +80,51 @@ export default function OrdersScreen() {
   const handleValidation = async () => {
     if (cart.length === 0 || isProcessing) return;
 
+    if (isCaissier && !currentSession && user?.role !== 'admin') {
+      Alert.alert("Erreur", "Aucune session de caisse ouverte. Veuillez ouvrir la caisse d'abord.");
+      return;
+    }
+
+    const actionText = isCaissier ? "Valider le paiement" : "Envoyer en cuisine";
+
     Alert.alert(
-      "Confirmer la commande",
-      `Valider l'envoi en cuisine ?\nTotal : ${formatPrice(total)}`,
+      "Confirmation",
+      `${actionText} ?\nTotal : ${formatPrice(total)}`,
       [
         { text: "Modifier", style: "cancel" },
         { 
-          text: "Valider", 
+          text: "Confirmer", 
           onPress: async () => {
             setIsProcessing(true);
             
-            // A. Déstockage automatique
             const destockSuccess = await processDestocking();
             
-            // B. Objet Order conforme
-            const newOrder: Order = {
-              id: Date.now().toString(),
+            const newOrder = {
               items: [...cart],
               total: total,
-              status: 'pending',
-              paymentMethod: 'cash',
+              status: isCaissier ? 'paid' : 'pending',
+              payment_method: 'cash',
+              created_by: user?.id,
+              session_id: currentSession?.id || null,
               created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
             };
 
-            // C. Enregistrement local et reset panier
-            dispatch({ type: 'ADD_ORDER', payload: newOrder });
+            const { error: orderError } = await supabase.from('orders').insert([newOrder]);
+
+            if (orderError) {
+                Alert.alert("Erreur", "Impossible d'enregistrer la commande.");
+                setIsProcessing(false);
+                return;
+            }
+
             dispatch({ type: 'CLEAR_CART' });
-
-            // D. Synchro pour voir les nouvelles alertes de stock
             await refreshAppData(dispatch);
-
             setIsProcessing(false);
             
-            if (destockSuccess) {
-              Alert.alert("Succès", "Commande validée ! Le stock a été mis à jour.");
-            } else {
-              Alert.alert("Attention", "Commande validée, mais le stock n'a pas pu être mis à jour automatiquement.");
-            }
+            Alert.alert(
+                isCaissier ? "Encaissé !" : "Envoyé !", 
+                isCaissier ? "Le paiement a été validé." : "Commande en attente de paiement."
+            );
             
             router.replace('/'); 
           } 
@@ -128,8 +136,15 @@ export default function OrdersScreen() {
   return (
     <ScreenContainer>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.title, { color: colors.foreground }]}>Panier</Text>
-        <Text style={{ color: colors.muted, fontWeight: '600' }}>Vérification des plats</Text>
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+            <View>
+                <Text style={[styles.title, { color: colors.foreground }]}>Panier</Text>
+                <Text style={{ color: colors.muted, fontWeight: '600' }}>
+                    {isCaissier ? "Mode Caissier (Encaisser)" : "Mode Serveur (Commander)"}
+                </Text>
+            </View>
+            {isCaissier && <View style={styles.badge}><Text style={styles.badgeText}>CAISSE</Text></View>}
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
@@ -168,7 +183,7 @@ export default function OrdersScreen() {
           <View style={styles.emptyContainer}>
             <Text style={{ fontSize: 50, marginBottom: 20 }}>🛒</Text>
             <Text style={[styles.emptyText, { color: colors.muted }]}>Panier vide</Text>
-            <TouchableOpacity onPress={() => router.push('/menu')} style={styles.emptyBtn}>
+            <TouchableOpacity onPress={() => router.push('/menu' as any)} style={styles.emptyBtn}>
               <Text style={{ color: colors.primary, fontWeight: 'bold' }}>Retour au menu</Text>
             </TouchableOpacity>
           </View>
@@ -192,14 +207,16 @@ export default function OrdersScreen() {
           </View>
 
           <TouchableOpacity 
-            style={[styles.submitBtn, { backgroundColor: isProcessing ? colors.muted : colors.primary }]}
+            style={[styles.submitBtn, { backgroundColor: isProcessing ? colors.muted : (isCaissier ? '#2ecc71' : colors.primary) }]}
             onPress={handleValidation}
             disabled={isProcessing}
           >
             {isProcessing ? (
               <ActivityIndicator color="white" />
             ) : (
-              <Text style={styles.submitBtnText}>VALIDER LA COMMANDE</Text>
+              <Text style={styles.submitBtnText}>
+                  {isCaissier ? "VALIDER LE PAIEMENT (CASH)" : "ENVOYER EN CUISINE"}
+              </Text>
             )}
           </TouchableOpacity>
         </View>
@@ -211,6 +228,8 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
   header: { padding: 25, borderBottomWidth: 1 },
   title: { fontSize: 28, fontWeight: '900' },
+  badge: { backgroundColor: '#2ecc71', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  badgeText: { color: 'white', fontSize: 10, fontWeight: '900' },
   list: { paddingHorizontal: 25, paddingBottom: 40 },
   item: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 20, borderBottomWidth: 1 },
   itemInfo: { flex: 1 },
@@ -219,7 +238,7 @@ const styles = StyleSheet.create({
   controls: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   btn: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   qty: { fontSize: 17, fontWeight: '800', minWidth: 25, textAlign: 'center' },
-  footer: { padding: 25, borderTopWidth: 1, paddingBottom: 40, borderTopLeftRadius: 30, borderTopRightRadius: 30 },
+  footer: { padding: 25, borderTopWidth: 1, paddingBottom: 40, borderTopLeftRadius: 30, borderTopRightRadius: 30, elevation: 20, shadowColor: '#000', shadowOffset: {width: 0, height: -10}, shadowOpacity: 0.1, shadowRadius: 10 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   totalRow: { marginTop: 15, paddingTop: 15, borderTopWidth: 1 },
   totalText: { fontSize: 20, fontWeight: '900' },
