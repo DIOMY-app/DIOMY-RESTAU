@@ -51,8 +51,8 @@ const config: ExpoConfig = {
           minSdkVersion: 24,
           compileSdkVersion: 34,
           targetSdkVersion: 34,
-          // Cette option permet d'ignorer les erreurs de compilation non critiques
-          // qui bloquaient le "Run gradlew" précédemment.
+          // FORCE la version Kotlin pour corriger l'erreur ExpoLinkingModule
+          kotlinVersion: "1.8.10",
           enableProguardInReleaseBuilds: true,
           extraMavenRepos: ["https://www.jitpack.io"]
         }
