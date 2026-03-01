@@ -49,10 +49,10 @@ const config: ExpoConfig = {
       {
         android: {
           minSdkVersion: 24,
-          compileSdkVersion: 35,
+          compileSdkVersion: 34,
           targetSdkVersion: 34,
-          // Correction critique pour expo-linking sur SDK 51
-          kotlinVersion: "1.9.25",
+          // 1.9.10 est moins stricte que 1.9.25 et résout le Type Mismatch
+          kotlinVersion: "1.9.10",
           enableProguardInReleaseBuilds: true
         }
       }
