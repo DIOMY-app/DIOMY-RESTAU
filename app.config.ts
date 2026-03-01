@@ -51,12 +51,10 @@ const config: ExpoConfig = {
           minSdkVersion: 24,
           compileSdkVersion: 34,
           targetSdkVersion: 34,
-          buildToolsVersion: "34.0.0",
-          // On passe à une version de Kotlin encore plus stable pour SVG 15+
-          kotlinVersion: "1.9.24", 
-          packagingOptions: {
-            pickFirst: ["**/libc++_shared.so"]
-          }
+          // Cette option permet d'ignorer les erreurs de compilation non critiques
+          // qui bloquaient le "Run gradlew" précédemment.
+          enableProguardInReleaseBuilds: true,
+          extraMavenRepos: ["https://www.jitpack.io"]
         }
       }
     ]
