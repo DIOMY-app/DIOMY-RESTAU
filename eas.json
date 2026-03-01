@@ -6,20 +6,32 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://cbcixttozweskkfcxlks.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiY2l4dHRvendlc2trZmN4bGtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE2Mjk1MjIsImV4cCI6MjA4NzIwNTUyMn0.raeeEHFY2gVa_ASyIRi_hAiFsnNqpljtGQcY56OO6HQ"
+      }
     },
     "preview": {
       "android": {
         "buildType": "apk",
         "image": "sdk-51"
       },
-      "node": "20.18.0"
+      "node": "20.18.0",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://cbcixttozweskkfcxlks.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiY2l4dHRvendlc2trZmN4bGtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE2Mjk1MjIsImV4cCI6MjA4NzIwNTUyMn0.raeeEHFY2gVa_ASyIRi_hAiFsnNqpljtGQcY56OO6HQ"
+      }
     },
     "production": {
       "android": {
         "image": "sdk-51"
       },
-      "node": "20.18.0"
+      "node": "20.18.0",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://cbcixttozweskkfcxlks.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiY2l4dHRvendlc2trZmN4bGtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE2Mjk1MjIsImV4cCI6MjA4NzIwNTUyMn0.raeeEHFY2gVa_ASyIRi_hAiFsnNqpljtGQcY56OO6HQ"
+      }
     }
   },
   "submit": {
