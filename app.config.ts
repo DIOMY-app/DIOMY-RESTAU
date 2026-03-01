@@ -20,7 +20,7 @@ const config: ExpoConfig = {
       backgroundColor: "#FFFFFF",
       foregroundImage: "./assets/logo.png"
     },
-    package: "com.opieddumont.app", // Package ID fixe et propre
+    package: "com.opieddumont.app",
     permissions: ["POST_NOTIFICATIONS", "WRITE_EXTERNAL_STORAGE"],
   },
   web: {
@@ -50,7 +50,12 @@ const config: ExpoConfig = {
         android: {
           minSdkVersion: 24,
           compileSdkVersion: 34,
-          targetSdkVersion: 34
+          targetSdkVersion: 34,
+          // Correction pour l'erreur compileReleaseJavaWithJavac
+          kotlinVersion: "1.8.10",
+          packagingOptions: {
+            pickFirst: ["**/libc++_shared.so"]
+          }
         }
       }
     ]
