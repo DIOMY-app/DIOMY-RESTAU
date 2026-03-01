@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 12.0.0"
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -9,10 +10,16 @@
     },
     "preview": {
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "image": "ubuntu-22.04",
+        "gradleCommand": ":app:assembleRelease"
       }
     },
-    "production": {}
+    "production": {
+      "android": {
+        "image": "ubuntu-22.04"
+      }
+    }
   },
   "submit": {
     "production": {}
