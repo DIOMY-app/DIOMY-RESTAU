@@ -51,8 +51,9 @@ const config: ExpoConfig = {
           minSdkVersion: 24,
           compileSdkVersion: 34,
           targetSdkVersion: 34,
-          // Correction pour l'erreur compileReleaseJavaWithJavac
-          kotlinVersion: "1.8.10",
+          buildToolsVersion: "34.0.0",
+          // On passe à une version de Kotlin encore plus stable pour SVG 15+
+          kotlinVersion: "1.9.24", 
           packagingOptions: {
             pickFirst: ["**/libc++_shared.so"]
           }
