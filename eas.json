@@ -11,13 +11,12 @@
     "preview": {
       "android": {
         "buildType": "apk",
-        "image": "ubuntu-22.04",
-        "gradleCommand": ":app:assembleRelease"
+        "image": "sdk-51"
       }
     },
     "production": {
       "android": {
-        "image": "ubuntu-22.04"
+        "image": "sdk-51"
       }
     }
   },
