@@ -1,7 +1,7 @@
 /**
  * Employees Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/employees.tsx
- * Version : Thème Earth & Harmonisation de l'équipe
+ * Version : Corrigée (colonne 'actif' vs 'est_actif')
  */
 
 import React, { useState } from 'react';
@@ -38,7 +38,8 @@ export default function EmployeesScreen() {
 
   const filteredEmployees = (state.employees || []).filter((emp: any) => {
     const matchesSearch = emp.nom.toLowerCase().includes(searchQuery.toLowerCase());
-    const isActive = emp.est_actif ?? true;
+    // Utilisation de 'actif' car c'est le nom dans la DB
+    const isActive = emp.actif ?? true; 
     const matchesStatus = filterStatus === 'all' || 
                          (filterStatus === 'active' ? isActive : !isActive);
     return matchesSearch && matchesStatus;
@@ -64,7 +65,7 @@ export default function EmployeesScreen() {
           telephone: newEmpPhone.replace(/\s/g, ''),
           role: newEmpRole,
           password: 'password123', // Mot de passe par défaut
-          est_actif: true
+          actif: true // CORRECTION : 'actif' au lieu de 'est_actif'
         }]);
 
       if (error) throw error;
@@ -87,7 +88,7 @@ export default function EmployeesScreen() {
     try {
       const { error } = await supabase
         .from('employes')
-        .update({ est_actif: !currentStatus })
+        .update({ actif: !currentStatus }) // CORRECTION : 'actif' au lieu de 'est_actif'
         .eq('id', id);
 
       if (error) throw error;
@@ -186,13 +187,13 @@ export default function EmployeesScreen() {
                 </View>
                 
                 <TouchableOpacity
-                  style={[styles.statusBadge, { backgroundColor: emp.est_actif ? colors.success + '20' : colors.error + '20' }]}
-                  onPress={() => handleToggleStatus(emp.id, emp.est_actif)}
+                  style={[styles.statusBadge, { backgroundColor: emp.actif ? colors.success + '20' : colors.error + '20' }]}
+                  onPress={() => handleToggleStatus(emp.id, emp.actif)}
                   disabled={!canManage}
                 >
-                  <View style={[styles.dot, { backgroundColor: emp.est_actif ? colors.success : colors.error }]} />
-                  <Text style={{ color: emp.est_actif ? colors.success : colors.error, fontSize: 11, fontWeight: '800' }}>
-                    {emp.est_actif ? 'Actif' : 'Désactivé'}
+                  <View style={[styles.dot, { backgroundColor: emp.actif ? colors.success : colors.error }]} />
+                  <Text style={{ color: emp.actif ? colors.success : colors.error, fontSize: 11, fontWeight: '800' }}>
+                    {emp.actif ? 'Actif' : 'Désactivé'}
                   </Text>
                 </TouchableOpacity>
               </View>

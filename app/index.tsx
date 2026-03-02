@@ -1,7 +1,7 @@
 /**
  * HomeScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/index.tsx
- * Mise à jour : Ajout du service "Analyse" pour la gestion des coûts et rentabilité
+ * Mise à jour : Ajout de l'onglet "Dépenses" (Comptabilité) pour Admin & Manager
  */
 
 import React, { useState, useEffect } from "react";
@@ -54,6 +54,14 @@ const QUICK_ACTIONS: QuickAction[] = [
     allowedRoles: ['admin', 'manager', 'chef', 'staff'] 
   },
   { 
+    id: '7', 
+    label: 'Dépenses', // <--- NOUVEL ONGLET COMPTABILITÉ
+    icon: '💸', 
+    route: 'depenses', 
+    color: '#A4161A', // Rouge brique pour distinguer les sorties d'argent
+    allowedRoles: ['admin', 'manager'] 
+  },
+  { 
     id: '4', 
     label: 'Rapports', 
     icon: '📈', 
@@ -62,7 +70,7 @@ const QUICK_ACTIONS: QuickAction[] = [
     allowedRoles: ['admin', 'manager', 'staff'] 
   },
   { 
-    id: '6', // Nouveau : Analyse de rentabilité (Gaz, Loyer, Marges)
+    id: '6', 
     label: 'Analyse', 
     icon: '⚖️', 
     route: 'AdminRentabilite', 
