@@ -28,13 +28,12 @@ const config: ExpoConfig = {
     output: "static",
     favicon: "./assets/logo.png",
   },
-  // AJOUT : Configuration pour EAS Update
+  // Configuration pour EAS Update
   updates: {
     url: "https://u.expo.dev/5accbe7c-8052-4c53-9e57-ca8eef4c83fb"
   },
-  runtimeVersion: {
-    policy: "appVersion"
-  },
+  // CORRECTION : On fixe la version à "1.0.0" pour forcer la compatibilité avec le build installé
+  runtimeVersion: "1.0.0",
   extra: {
     eas: {
       projectId: "5accbe7c-8052-4c53-9e57-ca8eef4c83fb"
