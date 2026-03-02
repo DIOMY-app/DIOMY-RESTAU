@@ -28,6 +28,13 @@ const config: ExpoConfig = {
     output: "static",
     favicon: "./assets/logo.png",
   },
+  // AJOUT : Configuration pour EAS Update
+  updates: {
+    url: "https://u.expo.dev/5accbe7c-8052-4c53-9e57-ca8eef4c83fb"
+  },
+  runtimeVersion: {
+    policy: "appVersion"
+  },
   extra: {
     eas: {
       projectId: "5accbe7c-8052-4c53-9e57-ca8eef4c83fb"
@@ -51,7 +58,6 @@ const config: ExpoConfig = {
           minSdkVersion: 24,
           compileSdkVersion: 34,
           targetSdkVersion: 34,
-          // 1.9.10 est moins stricte que 1.9.25 et résout le Type Mismatch
           kotlinVersion: "1.9.10",
           enableProguardInReleaseBuilds: true
         }
