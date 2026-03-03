@@ -38,5 +38,9 @@
     "tailwindcss": "3.3.2",
     "typescript": "5.3.3"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1"
+  }
 }
