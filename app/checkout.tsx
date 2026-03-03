@@ -1,7 +1,8 @@
 /**
  * Checkout Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/checkout.tsx
- * Version : 1.3 - Correction stricte des types CartItem (Sync English properties)
+ * Version : 1.5 - Correction Flux Admin & Multi-Paniers
+ * Règle n°2 : Toujours fournir le code complet du fichier.
  */
 
 import React, { useState } from 'react';
@@ -20,14 +21,19 @@ import { supabase } from '../supabase';
 export default function CheckoutScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { state, dispatch } = useApp();
+  const { state, dispatch, actions } = useApp();
   
   const [customerName, setCustomerName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Correction des propriétés pour correspondre au type CartItem (name, price, quantity)
-  const subtotal = state.cart.reduce((sum, item) => {
+  // RÉCUPÉRATION DU PANIER ACTIF (Important pour le Multi-Paniers)
+  const activeTab = state.activeTab ?? 0;
+  const activeCart = state.carts[activeTab] || [];
+  const user = state.user;
+
+  // Calculs financiers
+  const subtotal = activeCart.reduce((sum, item) => {
     const p = item.price || 0;
     const q = item.quantity || 0;
     return sum + (p * q);
@@ -37,21 +43,26 @@ export default function CheckoutScreen() {
   const total = subtotal + serviceCharge;
 
   const validateOrder = async () => {
+    if (activeCart.length === 0) {
+      Alert.alert("Panier vide", "Aucun article à encaisser.");
+      return;
+    }
+
     if (!customerName || !phoneNumber) {
-      Alert.alert("Champs manquants", "Veuillez remplir le nom et le numéro WhatsApp.");
+      Alert.alert("Champs manquants", "Veuillez remplir le nom et le numéro WhatsApp du client.");
       return;
     }
 
     const cleanPhone = phoneNumber.replace(/\s/g, '');
     if (cleanPhone.length < 8) {
-      Alert.alert("Numéro invalide", "Veuillez entrer un numéro de téléphone valide.");
+      Alert.alert("Numéro invalide", "Veuillez entrer un numéro valide (ex: 0701020304).");
       return;
     }
 
     setIsProcessing(true);
 
     try {
-      // 1. Mise à jour automatique de la 'derniere_visite' du client
+      // 1. Enregistrement / Mise à jour du client (Fidélité)
       const { data: customer, error: custError } = await supabase
         .from('clients')
         .upsert({ 
@@ -65,14 +76,14 @@ export default function CheckoutScreen() {
 
       if (custError) throw custError;
 
-      // 2. Préparation des items avec les propriétés détectées dans ton interface
-      const itemsForSql = state.cart.map(item => ({
-        nom: item.name || 'Produit sans nom',
+      // 2. Préparation des lignes de vente
+      const itemsForSql = activeCart.map(item => ({
+        nom: item.name || 'Produit',
         quantite: item.quantity || 1,
         prix_unitaire: item.price || 0
       }));
 
-      // 3. Enregistrement Transaction
+      // 3. Création de la transaction financière
       const { data: transaction, error: transError } = await supabase
         .from('transactions')
         .insert({
@@ -82,7 +93,8 @@ export default function CheckoutScreen() {
           sous_total: subtotal,
           items: itemsForSql,
           mode_paiement: 'especes',
-          caissier: state.user?.nom || 'Vente Directe',
+          caissier: user?.nom || 'Admin',
+          session_id: state.currentSession?.id || null,
           creee_a: new Date().toISOString()
         })
         .select()
@@ -90,45 +102,49 @@ export default function CheckoutScreen() {
 
       if (transError) throw transError;
 
-      // 4. Reçu WhatsApp
-      const itemsList = state.cart
+      // 4. Construction du reçu numérique WhatsApp
+      const itemsList = activeCart
         .map((item) => `• ${item.quantity}x ${item.name} : ${formatPrice((item.price || 0) * (item.quantity || 0))}`)
         .join('\n');
 
       const message = 
         `*🏔️ O'PIED DU MONT 🍴*\n` +
         `------------------------------------------\n` +
-        `Merci pour votre visite *${customerName}* !\n\n` +
-        `*DÉTAILS DU REÇU :*\n` +
+        `Merci pour votre confiance *${customerName}* !\n\n` +
+        `*VOTRE REÇU :*\n` +
         `${itemsList}\n` +
         `------------------------------------------\n` +
         `Sous-total : ${formatPrice(subtotal)}\n` +
         `Service (5%) : ${formatPrice(serviceCharge)}\n` +
-        `*TOTAL : ${formatPrice(total)}*\n\n` +
-        `_Au plaisir de vous revoir bientôt ! ✨_`;
+        `*TOTAL PAYÉ : ${formatPrice(total)}*\n\n` +
+        `_Reçu généré par ${user?.nom || 'la direction'}. ✨_`;
 
       const whatsappUrl = `whatsapp://send?phone=225${cleanPhone}&text=${encodeURIComponent(message)}`;
 
       Alert.alert(
-        "Vente enregistrée ✅",
-        `Transaction #${transaction.id.toString().slice(-4)} réussie.`,
+        "Vente Terminée ✅",
+        `Le paiement de ${formatPrice(total)} a été enregistré.`,
         [
           { 
-            text: "Terminer", 
-            onPress: () => {
+            text: "Fermer", 
+            onPress: async () => {
               dispatch({ type: 'CLEAR_CART' });
+              if (actions?.refresh) await actions.refresh();
               router.replace('/'); 
             }
           },
           { 
-            text: "Envoyer le Reçu", 
+            text: "Envoyer Reçu WhatsApp", 
             style: "default",
             onPress: async () => {
               const supported = await Linking.canOpenURL(whatsappUrl);
-              if (supported) {
-                await Linking.openURL(whatsappUrl);
+              if (supported) { 
+                await Linking.openURL(whatsappUrl); 
+              } else {
+                Alert.alert("Erreur", "WhatsApp n'est pas installé.");
               }
               dispatch({ type: 'CLEAR_CART' });
+              if (actions?.refresh) await actions.refresh();
               router.replace('/');
             }
           }
@@ -136,8 +152,8 @@ export default function CheckoutScreen() {
       );
 
     } catch (error: any) {
-      console.error("Erreur Checkout:", error.message);
-      Alert.alert("Erreur", error.message);
+      console.error("Erreur Checkout:", error);
+      Alert.alert("Erreur de transaction", error.message);
     } finally {
       setIsProcessing(false);
     }
@@ -147,26 +163,28 @@ export default function CheckoutScreen() {
     <ScreenContainer>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.foreground }]}>Paiement</Text>
-          <Text style={{ color: colors.muted }}>Client : {customerName || '...'}</Text>
+          <Text style={[styles.title, { color: colors.foreground }]}>Encaissement</Text>
+          <Text style={[styles.subtitle, { color: colors.muted }]}>
+            Panier #{activeTab + 1} • {user?.role === 'admin' ? 'Mode Direction' : 'Mode Caisse'}
+          </Text>
         </View>
         
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.label, { color: colors.muted }]}>NOM DU CLIENT</Text>
           <TextInput
             style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background }]}
-            placeholder="Ex: M. Diomande"
+            placeholder="Ex: M. Kouassi"
             placeholderTextColor={colors.muted}
             value={customerName}
             onChangeText={setCustomerName}
           />
 
-          <Text style={[styles.label, { color: colors.muted, marginTop: 20 }]}>WHATSAPP (SANS +225)</Text>
+          <Text style={[styles.label, { color: colors.muted, marginTop: 20 }]}>WHATSAPP (CÔTE D'IVOIRE)</Text>
           <View style={[styles.phoneWrapper, { borderColor: colors.border, backgroundColor: colors.background }]}>
             <Text style={[styles.prefix, { color: colors.muted }]}>+225 </Text>
             <TextInput
               style={[styles.phoneInput, { color: colors.foreground }]}
-              placeholder="0701020304"
+              placeholder="0700000000"
               placeholderTextColor={colors.muted}
               keyboardType="phone-pad"
               maxLength={10}
@@ -178,15 +196,15 @@ export default function CheckoutScreen() {
 
         <View style={styles.summaryContainer}>
           <View style={styles.summaryLine}>
-            <Text style={{ color: colors.muted }}>Articles :</Text>
-            <Text style={{ color: colors.foreground }}>{formatPrice(subtotal)}</Text>
+            <Text style={{ color: colors.muted, fontSize: 16 }}>Articles ({activeCart.length})</Text>
+            <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '600' }}>{formatPrice(subtotal)}</Text>
           </View>
           <View style={styles.summaryLine}>
-            <Text style={{ color: colors.muted }}>Service (5%) :</Text>
-            <Text style={{ color: colors.foreground }}>{formatPrice(serviceCharge)}</Text>
+            <Text style={{ color: colors.muted, fontSize: 16 }}>Frais de service (5%)</Text>
+            <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '600' }}>{formatPrice(serviceCharge)}</Text>
           </View>
-          <View style={[styles.summaryLine, styles.totalLine, { borderTopColor: colors.border }]}>
-            <Text style={[styles.totalLabel, { color: colors.foreground }]}>Total Net</Text>
+          <View style={[styles.totalLine, { borderTopColor: colors.border }]}>
+            <Text style={[styles.totalLabel, { color: colors.foreground }]}>TOTAL À ENCAISSER</Text>
             <Text style={[styles.totalAmount, { color: colors.primary }]}>{formatPrice(total)}</Text>
           </View>
         </View>
@@ -199,12 +217,12 @@ export default function CheckoutScreen() {
           {isProcessing ? (
             <ActivityIndicator color="#FFF" />
           ) : (
-            <Text style={styles.submitBtnText}>VALIDER LA VENTE</Text>
+            <Text style={styles.submitBtnText}>CONFIRMER LE PAIEMENT</Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={{ color: colors.muted, fontWeight: '600' }}>Modifier le panier</Text>
+          <Text style={{ color: colors.muted, fontWeight: '700' }}>← Retour au panier</Text>
         </TouchableOpacity>
       </ScrollView>
     </ScreenContainer>
@@ -212,21 +230,22 @@ export default function CheckoutScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 25 },
+  container: { padding: 25, paddingBottom: 60 },
   header: { marginBottom: 30 },
-  title: { fontSize: 32, fontWeight: '900', letterSpacing: -1 },
-  card: { padding: 20, borderRadius: 24, borderWidth: 1, marginBottom: 25 },
-  label: { fontSize: 11, fontWeight: '800', marginBottom: 8, letterSpacing: 0.5 },
-  input: { borderWidth: 1, borderRadius: 12, padding: 15, fontSize: 16, fontWeight: '600' },
-  phoneWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingHorizontal: 15 },
-  prefix: { fontSize: 16, fontWeight: 'bold' },
-  phoneInput: { flex: 1, height: 55, fontSize: 18, fontWeight: '700' },
-  summaryContainer: { marginBottom: 40, paddingHorizontal: 5 },
-  summaryLine: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  totalLine: { marginTop: 15, paddingTop: 15, borderTopWidth: 1 },
-  totalLabel: { fontSize: 20, fontWeight: '900' },
-  totalAmount: { fontSize: 28, fontWeight: '900' },
-  submitBtn: { height: 65, borderRadius: 20, alignItems: 'center', justifyContent: 'center', elevation: 8 },
-  submitBtnText: { color: '#fff', fontSize: 17, fontWeight: '900', letterSpacing: 1 },
-  backBtn: { marginTop: 25, alignItems: 'center', padding: 10 }
+  title: { fontSize: 34, fontWeight: '900', letterSpacing: -1.5 },
+  subtitle: { fontSize: 14, fontWeight: '600', marginTop: 5 },
+  card: { padding: 25, borderRadius: 28, borderWidth: 1, marginBottom: 25, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 },
+  label: { fontSize: 10, fontWeight: '900', marginBottom: 10, letterSpacing: 1, textTransform: 'uppercase' },
+  input: { borderWidth: 1.5, borderRadius: 16, padding: 18, fontSize: 16, fontWeight: '700' },
+  phoneWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 18 },
+  prefix: { fontSize: 18, fontWeight: '800' },
+  phoneInput: { flex: 1, height: 60, fontSize: 20, fontWeight: '800' },
+  summaryContainer: { marginBottom: 35, paddingHorizontal: 5 },
+  summaryLine: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  totalLine: { marginTop: 15, paddingTop: 20, borderTopWidth: 2, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  totalLabel: { fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
+  totalAmount: { fontSize: 32, fontWeight: '900' },
+  submitBtn: { height: 70, borderRadius: 22, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8 },
+  submitBtnText: { color: '#fff', fontSize: 18, fontWeight: '900', letterSpacing: 1 },
+  backBtn: { marginTop: 30, alignItems: 'center', padding: 15 }
 });

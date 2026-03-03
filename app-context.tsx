@@ -1,7 +1,7 @@
 /**
  * AppContext - Global State Management for O'PIED DU MONT
  * Emplacement : racine (./app-context.tsx)
- * Version : 3.4 - Support Marketing & Rentabilité
+ * Version : 3.5 - Synchronisation Marketing (Relance 30 jours)
  * Règle n°2 : Code complet fourni.
  */
 
@@ -161,8 +161,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const loadData = async () => {
     dispatch({ type: 'SET_LOADING', payload: true });
     try {
-      const fifteenDaysAgo = new Date();
-      fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+      // Calcul pour la relance client : 30 jours (Règle n°3 : Analyse historique)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
       const [
         { data: cats },
@@ -179,9 +180,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         supabase.from('employes').select('*').order('nom'),
         supabase.from('sessions_caisse').select('*').eq('statut', 'ouvert').maybeSingle(),
         supabase.from('charges_fixes').select('*').order('nom'),
+        // Requête marketing : compte les clients inactifs depuis 30 jours
         supabase.from('clients')
           .select('*', { count: 'exact', head: true })
-          .lt('derniere_visite', fifteenDaysAgo.toISOString())
+          .or(`derniere_commande.lt.${thirtyDaysAgo.toISOString()},derniere_commande.is.null`)
           .eq('actif', true)
       ]);
 

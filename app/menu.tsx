@@ -1,7 +1,8 @@
 /**
  * Menu Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/menu.tsx
- * Version : Gestion des accompagnements (Sauces/Grillades) et filtres
+ * Version : 3.7 - Accès Admin débloqué & Gestion Accompagnements
+ * Règle n°2 : Code complet fourni.
  */
 
 import React, { useState } from 'react';
@@ -9,6 +10,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, TextInput, 
   StyleSheet, ActivityIndicator, Modal, Alert 
 } from 'react-native';
+import { useRouter } from 'expo-router';
 
 import { ScreenContainer } from '../components/screen-container';
 import { useColors } from '../hooks/use-colors';
@@ -18,6 +20,7 @@ import { MenuItem, Category } from '../types';
 
 export default function MenuScreen() {
   const colors = useColors();
+  const router = useRouter();
   const { state, dispatch } = useApp(); 
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -26,6 +29,9 @@ export default function MenuScreen() {
   // États pour la gestion des accompagnements
   const [showAccompModal, setShowAccompModal] = useState(false);
   const [pendingItem, setPendingItem] = useState<MenuItem | null>(null);
+
+  // Vérification du rôle pour adapter l'interface si besoin
+  const isAdmin = state.user?.role === 'admin';
 
   const categories = ['Tous', ...state.categories.map((c: Category) => c.name)];
 
@@ -37,7 +43,7 @@ export default function MenuScreen() {
     return matchesSearch && matchesCategory;
   });
 
-  // Accompagnements spécifiques à la culture locale ivoirienne
+  // Accompagnements ivoiriens
   const ACCOMPAGNEMENTS_GRILLADES = ["Attiéké", "Aloco", "Frites", "Salade", "Riz Gras"];
   const ACCOMPAGNEMENTS_SAUCES = ["Riz Blanc", "Foutou Banane", "Placali", "Tô"];
 
@@ -45,7 +51,6 @@ export default function MenuScreen() {
     const itemNameLower = item.name.toLowerCase();
     const itemCatLower = (item.category || '').toLowerCase();
 
-    // Logique de détection : Grillades ou Sauces
     const isSauce = itemNameLower.includes('sauce') || itemCatLower.includes('sauce');
     const isGrillade = itemCatLower.includes('grillade') || itemNameLower.includes('grillé') || itemNameLower.includes('pintade') || itemNameLower.includes('poulet');
 
@@ -63,13 +68,12 @@ export default function MenuScreen() {
     dispatch({
       type: 'ADD_TO_CART',
       payload: {
-        // Utilisation d'un ID unique basé sur le temps pour le panier
         id: `${item.id}-${Date.now()}`, 
         menuItemId: item.id,
         name: finalName,
         price: item.price,
         quantity: 1,
-        quantite: 1 // Double mapping pour compatibilité avec certains services
+        quantite: 1 
       }
     });
 
@@ -77,12 +81,24 @@ export default function MenuScreen() {
       setShowAccompModal(false);
       setPendingItem(null);
     }
+
+    // Petit feedback visuel pour l'admin/serveur
+    Alert.alert("Ajouté", `${finalName} est dans le panier.`);
   };
 
   return (
     <ScreenContainer>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.foreground }]}>Notre Carte</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+          <Text style={[styles.title, { color: colors.foreground, marginBottom: 0 }]}>La Carte</Text>
+          <TouchableOpacity 
+            onPress={() => router.push('/orders' as any)}
+            style={[styles.cartBadge, { backgroundColor: colors.primary }]}
+          >
+            <Text style={{ color: 'white', fontWeight: 'bold' }}>Voir Panier</Text>
+          </TouchableOpacity>
+        </View>
+
         <TextInput
           style={[styles.searchInput, { 
             borderColor: colors.border, 
@@ -131,7 +147,7 @@ export default function MenuScreen() {
                 <View style={styles.flex1}>
                   <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
                   <Text style={[styles.itemDesc, { color: colors.muted }]} numberOfLines={2}>
-                    {item.description || "Aucune description disponible"}
+                    {item.description || "O'PIED DU MONT Special"}
                   </Text>
                 </View>
                 <Text style={[styles.itemPrice, { color: colors.primary }]}>
@@ -140,31 +156,31 @@ export default function MenuScreen() {
               </View>
               
               <TouchableOpacity 
-                style={[styles.addBtn, { backgroundColor: item.available ? colors.primary : colors.muted }]}
+                style={[styles.addBtn, { backgroundColor: item.available ? (isAdmin ? '#22c55e' : colors.primary) : colors.muted }]}
                 onPress={() => item.available && handlePressItem(item)}
                 disabled={!item.available}
               >
                 <Text style={styles.addBtnText}>
-                  {item.available ? "Ajouter à la commande" : "Épuisé"}
+                  {item.available ? (isAdmin ? "PRENDRE LA COMMANDE" : "AJOUTER") : "ÉPUISÉ"}
                 </Text>
               </TouchableOpacity>
             </View>
           ))
         ) : (
           <View style={styles.center}>
-            <Text style={{color: colors.muted, fontWeight: '600'}}>Aucun résultat pour cette recherche.</Text>
+            <Text style={{color: colors.muted, fontWeight: '600'}}>Aucun plat trouvé.</Text>
           </View>
         )}
       </ScrollView>
 
       {/* MODAL DE SÉLECTION D'ACCOMPAGNEMENT */}
-      <Modal visible={showAccompModal} transparent animationType="fade">
+      <Modal visible={showAccompModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={styles.modalIndicator} />
             <Text style={[styles.modalTitle, { color: colors.foreground }]}>Accompagnement</Text>
             <Text style={{ color: colors.muted, marginBottom: 25, fontSize: 16 }}>
-              Quel accompagnement pour votre <Text style={{fontWeight:'bold', color: colors.primary}}>{pendingItem?.name}</Text> ?
+              Choix pour : <Text style={{fontWeight:'bold', color: colors.primary}}>{pendingItem?.name}</Text>
             </Text>
             
             <View style={styles.accompGrid}>
@@ -194,7 +210,8 @@ export default function MenuScreen() {
 
 const styles = StyleSheet.create({
   header: { padding: 20, paddingBottom: 10 },
-  title: { fontSize: 32, fontWeight: '900', marginBottom: 15, letterSpacing: -1 },
+  title: { fontSize: 32, fontWeight: '900', letterSpacing: -1 },
+  cartBadge: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 12 },
   searchInput: { borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 12, fontSize: 16, fontWeight: '600' },
   categoryContainer: { paddingLeft: 20, marginBottom: 10, marginTop: 5 },
   categoryBadge: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25, borderWidth: 1.5, marginRight: 10 },

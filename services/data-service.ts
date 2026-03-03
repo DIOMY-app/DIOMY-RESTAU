@@ -1,7 +1,8 @@
 /**
  * Data Service - O'PIED DU MONT
- * Gère la synchronisation globale (Menu, Catégories, Stocks, Employés)
- * Version Optimisée : Déduction atomique via RPC (decrement_stock)
+ * Gère la synchronisation globale (Menu, Catégories, Stocks, Employés, Marketing)
+ * Version 4.0 : Intégration du calcul des clients à relancer
+ * Règle n°2 : Toujours fournir le code complet.
  */
 
 import { supabase } from '../supabase';
@@ -15,32 +16,43 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
   dispatch({ type: 'SET_LOADING', payload: true });
 
   try {
-    const now = new Date().toISOString();
+    const now = new Date();
+    const isoNow = now.toISOString();
+
+    // Calcul de la date limite pour le marketing (30 jours en arrière)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const [
       { data: categoriesData, error: catError },
       { data: menuData, error: menuError },
       { data: stockData, error: stockError },
-      { data: employeesData, error: empError }
+      { data: employeesData, error: empError },
+      { data: marketingData, error: markError }
     ] = await Promise.all([
       supabase.from('categories').select('*'),
       supabase.from('menu').select('*').eq('actif', true),
       supabase.from('stock').select('*'),
-      supabase.from('employes').select('*').eq('actif', true)
+      supabase.from('employes').select('*').eq('actif', true),
+      // Récupère les clients dont la dernière commande est ancienne ou inexistante
+      supabase.from('clients')
+        .select('id, derniere_commande')
+        .or(`derniere_commande.lt.${thirtyDaysAgo.toISOString()},derniere_commande.is.null`)
     ]);
 
     if (catError) throw catError;
     if (menuError) throw menuError;
     if (stockError) throw stockError;
     if (empError) throw empError;
+    if (markError) throw markError;
 
     const formattedCategories = (categoriesData || []).map(cat => ({
       id: cat.id.toString(),
       name: cat.nom,
       color: cat.couleur || '#EAB308',
       icon: cat.icone || '🍴',
-      createdAt: cat.created_at || now,
-      updatedAt: cat.created_at || now
+      createdAt: cat.created_at || isoNow,
+      updatedAt: cat.created_at || isoNow
     }));
 
     const formattedMenuItems = (menuData || []).map(item => {
@@ -53,8 +65,8 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
         category: categoryObj ? categoryObj.name : 'Autre',
         available: item.actif,
         image: item.image || '',
-        createdAt: item.created_at || now,
-        updatedAt: item.created_at || now
+        createdAt: item.created_at || isoNow,
+        updatedAt: item.created_at || isoNow
       };
     });
 
@@ -65,9 +77,9 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
       unit: s.unite || 'pcs',
       minQuantity: Number(s.seuil_alerte) || 5,
       maxQuantity: 100, 
-      lastUpdated: s.derniere_mise_a_jour || now,
-      createdAt: now,
-      updatedAt: now
+      lastUpdated: s.derniere_mise_a_jour || isoNow,
+      createdAt: isoNow,
+      updatedAt: isoNow
     }));
 
     const formattedEmployees = (employeesData || []).map(emp => ({
@@ -76,18 +88,20 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
       telephone: emp.telephone || '',
       role: emp.role || 'staff',
       est_actif: emp.actif,
-      hireDate: emp.created_at || now,
-      created_at: emp.created_at || now,
-      updated_at: emp.created_at || now
+      hireDate: emp.created_at || isoNow,
+      created_at: emp.created_at || isoNow,
+      updated_at: emp.created_at || isoNow
     }));
 
+    // Dispatch global incluant le marketingCount
     dispatch({
       type: 'SET_DATA',
       payload: {
         categories: formattedCategories,
         menuItems: formattedMenuItems,
         stockItems: formattedStocks,
-        employees: formattedEmployees
+        employees: formattedEmployees,
+        marketingCount: marketingData?.length || 0 // Mise à jour du badge HomeScreen
       }
     });
 
@@ -101,32 +115,26 @@ export const refreshAppData = async (dispatch: React.Dispatch<AppAction>) => {
 
 /**
  * DÉDUCTION DES STOCKS (Version RPC Atomique)
- * Gère les recettes (multi-ingrédients) et les produits directs
  */
 export const deductStockFromOrder = async (items: CartItem[]) => {
   try {
     for (const item of items) {
       const menuId = parseInt(item.menuItemId || item.id);
 
-      // 1. Récupérer la recette pour cet article
       const { data: recette } = await supabase
         .from('menu_recettes')
         .select('stock_id, quantite_consommee')
         .eq('menu_id', menuId);
 
       if (recette && recette.length > 0) {
-        // SCÉNARIO A : RECETTE (Ex: Burger déduit pain, viande...)
         for (const ingredient of recette) {
           const quantiteARetirer = Number(ingredient.quantite_consommee) * item.quantity;
-          
-          // Appel de la fonction SQL créée précédemment
           await supabase.rpc('decrement_stock', { 
             row_id: ingredient.stock_id, 
             amount: quantiteARetirer 
           });
         }
       } else {
-        // SCÉNARIO B : PRODUIT DIRECT (Ex: Canette de Coca)
         const { data: stockItem } = await supabase
           .from('stock')
           .select('id')

@@ -1,7 +1,8 @@
 /**
  * RapportScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/Rapportscreen.tsx
- * Version : 3.3 - Top Clients + Action WhatsApp Directe
+ * Version : 3.5 - Correction Syntaxique (Filtres)
+ * Règle n°2 : Code complet fourni.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -178,7 +179,7 @@ export default function RapportScreen() {
   const handleMarketingAction = () => {
     Alert.alert(
       "Campagne Marketing",
-      `Voulez-vous envoyer une relance WhatsApp aux ${marketingCount} clients inactifs ?`,
+      `Voulez-vous envoyer une relance WhatsApp aux ${marketingCount} clients inactifs depuis plus de 30 jours ?`,
       [
         { text: "Plus tard", style: "cancel" },
         { 
@@ -250,7 +251,7 @@ export default function RapportScreen() {
             </View>
             <View style={{ flex: 1, marginLeft: 15 }}>
               <Text style={styles.marketingTitle}>{marketingCount} clients à relancer</Text>
-              <Text style={styles.marketingSub}>Inactifs depuis plus de 15 jours</Text>
+              <Text style={styles.marketingSub}>Inactifs depuis plus de 30 jours</Text>
             </View>
             <View style={styles.marketingArrow}>
               <Text style={{ color: 'white', fontWeight: '900' }}>→</Text>
@@ -272,7 +273,7 @@ export default function RapportScreen() {
               ]}
             >
               <Text style={{ color: selectedPeriod === p ? 'white' : colors.foreground, fontWeight: '800', fontSize: 10 }}>
-                {p === 'jour' ? 'AUJOURD\'HUI' : p.toUpperCase()}
+                {p === 'jour' ? "AUJOURD'HUI" : p.toUpperCase()}
               </Text>
             </TouchableOpacity>
           ))}

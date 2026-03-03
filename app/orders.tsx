@@ -1,7 +1,8 @@
 /**
  * Orders / Cart Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/orders.tsx
- * Version : Alignée sur Multi-Paniers + Déstockage Sécurisé
+ * Version : 3.6 - Accès Admin Universel & Redirection Menu
+ * Règle n°2 : Code complet fourni.
  */
 
 import React, { useState } from 'react';
@@ -21,12 +22,13 @@ export default function OrdersScreen() {
   const { state, dispatch } = useApp();
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // RÉCUPÉRATION DU PANIER ACTIF (Basé sur l'onglet sélectionné dans la Caisse)
+  // RÉCUPÉRATION DU PANIER ACTIF
   const activeTab = state.activeTab ?? 0;
   const cart = state.carts[activeTab] || [];
   
   const user = state.user;
-  // Note : activeCashierId vient de ton state global (voir CaisseScreen)
+  
+  // CORRECTION : L'Admin a désormais les mêmes droits que le caissier responsable ET le serveur
   const isCaissierResponsable = user?.id === state.activeCashierId || user?.role === 'admin';
 
   // Calculs financiers
@@ -52,7 +54,6 @@ export default function OrdersScreen() {
   const processDestocking = async () => {
     try {
       for (const item of cart) {
-        // 1. Récupérer les ingrédients liés au plat
         const { data: recipe, error: recipeError } = await supabase
           .from('menu_recettes')
           .select('stock_id, quantite_consommee')
@@ -60,7 +61,6 @@ export default function OrdersScreen() {
 
         if (recipeError) throw recipeError;
 
-        // 2. Déduire chaque ingrédient multiplié par la quantité commandée
         if (recipe && recipe.length > 0) {
           for (const ingredient of recipe) {
             const totalToDeduct = ingredient.quantite_consommee * item.quantity;
@@ -70,7 +70,6 @@ export default function OrdersScreen() {
             });
             if (rpcError) {
                 console.error(`Erreur stock pour ${item.name}:`, rpcError);
-                // On continue pour les autres mais on pourrait bloquer ici
             }
           }
         }
@@ -85,23 +84,21 @@ export default function OrdersScreen() {
   const handleValidation = async () => {
     if (cart.length === 0 || isProcessing) return;
 
+    // L'admin peut choisir de valider directement ou d'envoyer en cuisine
     const actionText = isCaissierResponsable ? "Valider le paiement" : "Envoyer en cuisine";
 
     Alert.alert(
       "Confirmation",
-      `${actionText} ?\nTotal à payer : ${formatPrice(total)}`,
+      `${actionText} ?\nTotal : ${formatPrice(total)}`,
       [
         { text: "Modifier", style: "cancel" },
         { 
           text: "Confirmer", 
           onPress: async () => {
             setIsProcessing(true);
-            
             try {
-              // A. Déstockage
               await processDestocking();
               
-              // B. Enregistrement de la commande
               const { data: orderData, error: orderError } = await supabase
                 .from('orders')
                 .insert([{
@@ -117,14 +114,12 @@ export default function OrdersScreen() {
 
               if (orderError) throw orderError;
 
-              // C. Envoi auto en cuisine (table de préparation)
               await supabase.from('preparation_cuisine').insert([{
                 order_id: orderData.id,
                 items: cart,
                 status: 'waiting'
               }]);
 
-              // D. Nettoyage et Refresh
               dispatch({ type: 'CLEAR_CART' });
               await refreshAppData(dispatch);
               
@@ -151,7 +146,7 @@ export default function OrdersScreen() {
         <Text style={[styles.title, { color: colors.foreground }]}>Panier Client {activeTab + 1}</Text>
         <View style={[styles.roleBadge, { backgroundColor: isCaissierResponsable ? '#dcfce7' : '#dbeafe' }]}>
             <Text style={{ color: isCaissierResponsable ? '#166534' : '#1e40af', fontWeight: 'bold', fontSize: 12 }}>
-                {isCaissierResponsable ? "Mode Encaisssement" : "Mode Prise de Commande"}
+                {isCaissierResponsable ? "Mode Admin / Encaisssement" : "Mode Prise de Commande"}
             </Text>
         </View>
       </View>
@@ -190,10 +185,15 @@ export default function OrdersScreen() {
           ))
         ) : (
           <View style={styles.emptyContainer}>
-            <Text style={{ fontSize: 60, marginBottom: 20 }}>🧺</Text>
-            <Text style={[styles.emptyText, { color: colors.muted }]}>Votre panier est vide</Text>
-            <TouchableOpacity onPress={() => router.push('/menu' as any)} style={styles.emptyBtn}>
-              <Text style={{ color: colors.primary, fontWeight: '900', fontSize: 16 }}>Parcourir la carte</Text>
+            <Text style={{ fontSize: 60, marginBottom: 20 }}>🛒</Text>
+            <Text style={[styles.emptyText, { color: colors.muted }]}>Aucun article sélectionné</Text>
+            <TouchableOpacity 
+              onPress={() => router.push('/' as any)} // Retour à l'écran principal (Caisse/Menu)
+              style={styles.emptyBtn}
+            >
+              <Text style={{ color: colors.primary, fontWeight: '900', fontSize: 16 }}>
+                ALLER AU MENU POUR PRENDRE COMMANDE
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -224,7 +224,7 @@ export default function OrdersScreen() {
               <ActivityIndicator color="white" />
             ) : (
               <Text style={styles.submitBtnText}>
-                  {isCaissierResponsable ? "CONFIRMER L'ENCAISSEMENT" : "ENVOYER LE BON EN CUISINE"}
+                  {isCaissierResponsable ? "VALIDER & ENCAISSER" : "ENVOYER LE BON EN CUISINE"}
               </Text>
             )}
           </TouchableOpacity>
@@ -255,5 +255,5 @@ const styles = StyleSheet.create({
   submitBtnText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 1 },
   emptyContainer: { alignItems: 'center', marginTop: 100 },
   emptyText: { fontSize: 20, fontWeight: '700' },
-  emptyBtn: { marginTop: 20, padding: 15 }
+  emptyBtn: { marginTop: 20, padding: 20, alignItems: 'center', borderWidth: 2, borderRadius: 15, borderStyle: 'dashed' }
 });

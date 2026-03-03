@@ -1,7 +1,8 @@
 /**
  * Employees Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/employees.tsx
- * Version : 2.1 - Vérification Doublons & Reset PIN Admin
+ * Version : 2.4 - Correction Typage & Refresh Global
+ * Règle n°2 : Toujours fournir le code complet.
  */
 
 import React, { useState } from 'react';
@@ -20,7 +21,7 @@ type Role = 'admin' | 'manager' | 'waiter' | 'cashier' | 'chef' | 'staff';
 
 export default function EmployeesScreen() {
   const colors = useColors();
-  const { state } = useApp();
+  const { state, actions } = useApp(); // On utilise 'actions' qui contient 'refresh'
   
   // États pour la liste
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,7 +38,7 @@ export default function EmployeesScreen() {
   const isAdmin = state.user?.role === 'admin';
   const canManage = isAdmin || state.user?.role === 'manager';
 
-  // Filtrage local de la liste chargée dans le contexte
+  // Filtrage local
   const filteredEmployees = (state.employees || []).filter((emp: any) => {
     const nomMatch = emp.nom || '';
     const matchesSearch = nomMatch.toLowerCase().includes(searchQuery.toLowerCase());
@@ -47,7 +48,8 @@ export default function EmployeesScreen() {
     return matchesSearch && matchesStatus;
   });
 
-  // --- LOGIQUE : VÉRIFICATION DOUBLON ET AJOUT ---
+  // --- ACTIONS ---
+
   const handleAddEmployee = async () => {
     if (!newEmpName || !newEmpPhone) {
       Alert.alert("Champs requis", "Le nom et le téléphone sont obligatoires.");
@@ -62,7 +64,6 @@ export default function EmployeesScreen() {
 
     setIsActionLoading(true);
     try {
-      // 1. Vérification si le téléphone existe déjà (Règle Doublon)
       const { data: existing, error: checkError } = await supabase
         .from('employes')
         .select('id, nom')
@@ -75,27 +76,30 @@ export default function EmployeesScreen() {
         return Alert.alert("Doublon détecté", `Ce numéro appartient déjà à ${existing.nom}.`);
       }
 
-      // 2. Insertion si tout est OK
       const defaultPin = "1234";
+      const defaultPass = "123456"; // Ajout mot de passe par défaut
+      
       const { error } = await supabase
         .from('employes')
         .insert([{
           nom: newEmpName,
           telephone: cleanPhone,
           role: newEmpRole,
-          password: 'password123',
+          password: defaultPass, 
           pin: defaultPin,
           actif: true 
         }]);
 
       if (error) throw error;
 
+      // Rafraîchissement global de l'application
+      await actions.refresh();
+
       Alert.alert(
         "Succès ✨", 
-        `${newEmpName} a été ajouté.\n\nPIN par défaut : ${defaultPin}`
+        `${newEmpName} ajouté.\n\nPIN : ${defaultPin}\nMDP : ${defaultPass}`
       );
       
-      // Reset et fermeture
       setModalVisible(false);
       setNewEmpName('');
       setNewEmpPhone('');
@@ -107,23 +111,25 @@ export default function EmployeesScreen() {
     }
   };
 
-  // --- LOGIQUE : RESET PIN (Admin Uniquement) ---
   const handleResetPin = (id: string, nom: string) => {
     Alert.alert(
-      "Réinitialiser le PIN",
-      `Voulez-vous remettre le PIN de ${nom} à "1234" ?`,
+      "Réinitialiser",
+      `Remettre le PIN de ${nom} à "1234" ?`,
       [
         { text: "Annuler", style: "cancel" },
         { 
-          text: "Réinitialiser", 
+          text: "Confirmer", 
           onPress: async () => {
             const { error } = await supabase
               .from('employes')
-              .update({ pin: "1234" })
+              .update({ pin: "1234", password: "123456" })
               .eq('id', id);
             
-            if (!error) Alert.alert("Succès", `Le PIN de ${nom} est de nouveau 1234.`);
-            else Alert.alert("Erreur", "Impossible de réinitialiser le PIN.");
+            if (!error) {
+                await actions.refresh();
+                Alert.alert("Succès", "Identifiants réinitialisés (1234 / 123456).");
+            }
+            else Alert.alert("Erreur", "Action impossible.");
           }
         }
       ]
@@ -138,6 +144,7 @@ export default function EmployeesScreen() {
         .update({ actif: !currentStatus })
         .eq('id', id);
       if (error) throw error;
+      await actions.refresh();
     } catch (error: any) {
       Alert.alert("Erreur", "Impossible de modifier le statut.");
     }
@@ -160,6 +167,7 @@ export default function EmployeesScreen() {
           onPress: async () => {
             const { error } = await supabase.from('employes').delete().eq('id', id);
             if (error) Alert.alert("Erreur", "Impossible de supprimer ce membre.");
+            else await actions.refresh();
           }
         }
       ]
@@ -171,7 +179,7 @@ export default function EmployeesScreen() {
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.headerSection}>
           <Text style={[styles.title, { color: colors.foreground }]}>Équipe</Text>
-          <Text style={[styles.subtitle, { color: colors.muted }]}>O'PIED DU MONT - Gestion du personnel</Text>
+          <Text style={[styles.subtitle, { color: colors.muted }]}>Gestion du personnel</Text>
           
           <TextInput
             style={[styles.searchInput, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
@@ -267,66 +275,70 @@ export default function EmployeesScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Modal d'ajout */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={styles.modalOverlay}
+        >
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: colors.foreground }]}>Ajouter à l'Équipe</Text>
-                <TouchableOpacity onPress={() => setModalVisible(false)}>
-                  <Text style={{ color: colors.primary, fontWeight: '900' }}>ANNULER</Text>
-                </TouchableOpacity>
-            </View>
-            
-            <Text style={styles.modalLabel}>NOM COMPLET</Text>
-            <TextInput
-              style={[styles.modalInput, { borderColor: colors.border, color: colors.foreground }]}
-              placeholder="Ex: Kouassi Konan"
-              placeholderTextColor={colors.muted}
-              value={newEmpName}
-              onChangeText={setNewEmpName}
-            />
+            <ScrollView bounces={false} showsVerticalScrollIndicator={false}>
+              <View style={styles.modalHeader}>
+                  <Text style={[styles.modalTitle, { color: colors.foreground }]}>Ajouter à l'Équipe</Text>
+                  <TouchableOpacity onPress={() => setModalVisible(false)}>
+                    <Text style={{ color: colors.primary, fontWeight: '900' }}>ANNULER</Text>
+                  </TouchableOpacity>
+              </View>
+              
+              <Text style={styles.modalLabel}>NOM COMPLET</Text>
+              <TextInput
+                style={[styles.modalInput, { borderColor: colors.border, color: colors.foreground }]}
+                placeholder="Ex: Kouassi Konan"
+                placeholderTextColor={colors.muted}
+                value={newEmpName}
+                onChangeText={setNewEmpName}
+              />
 
-            <Text style={styles.modalLabel}>N° TÉLÉPHONE</Text>
-            <TextInput
-              style={[styles.modalInput, { borderColor: colors.border, color: colors.foreground }]}
-              placeholder="0700000000"
-              placeholderTextColor={colors.muted}
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={newEmpPhone}
-              onChangeText={setNewEmpPhone}
-            />
+              <Text style={styles.modalLabel}>N° TÉLÉPHONE</Text>
+              <TextInput
+                style={[styles.modalInput, { borderColor: colors.border, color: colors.foreground }]}
+                placeholder="0700000000"
+                placeholderTextColor={colors.muted}
+                keyboardType="phone-pad"
+                maxLength={10}
+                value={newEmpPhone}
+                onChangeText={setNewEmpPhone}
+              />
 
-            <Text style={styles.modalLabel}>RÔLE ATTRIBUÉ</Text>
-            <View style={styles.roleSelector}>
-              {(['waiter', 'cashier', 'chef', 'manager', 'staff'] as Role[]).map(r => (
-                <TouchableOpacity
-                  key={r}
-                  onPress={() => setNewEmpRole(r)}
-                  style={[styles.roleOption, { 
-                    borderColor: newEmpRole === r ? colors.primary : colors.border,
-                    backgroundColor: newEmpRole === r ? colors.primary + '15' : 'transparent'
-                  }]}
-                >
-                  <Text style={{ color: newEmpRole === r ? colors.primary : colors.muted, fontSize: 10, fontWeight: '900' }}>
-                    {formatRole(r).toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+              <Text style={styles.modalLabel}>RÔLE ATTRIBUÉ</Text>
+              <View style={styles.roleSelector}>
+                {(['waiter', 'cashier', 'chef', 'manager', 'staff'] as Role[]).map(r => (
+                  <TouchableOpacity
+                    key={r}
+                    onPress={() => setNewEmpRole(r)}
+                    style={[styles.roleOption, { 
+                      borderColor: newEmpRole === r ? colors.primary : colors.border,
+                      backgroundColor: newEmpRole === r ? colors.primary + '15' : 'transparent'
+                    }]}
+                  >
+                    <Text style={{ color: newEmpRole === r ? colors.primary : colors.muted, fontSize: 10, fontWeight: '900' }}>
+                      {formatRole(r).toUpperCase()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
 
-            <View style={styles.infoBox}>
-              <Text style={styles.infoText}>ℹ️ Un PIN par défaut (1234) sera attribué.</Text>
-            </View>
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>ℹ️ PIN : 1234 | MDP : 123456 par défaut.</Text>
+              </View>
 
-            <TouchableOpacity 
-              style={[styles.saveBtn, { backgroundColor: colors.primary }]} 
-              onPress={handleAddEmployee}
-              disabled={isActionLoading}
-            >
-              {isActionLoading ? <ActivityIndicator color="white" /> : <Text style={styles.saveBtnText}>ENREGISTRER</Text>}
-            </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.saveBtn, { backgroundColor: colors.primary }]} 
+                onPress={handleAddEmployee}
+                disabled={isActionLoading}
+              >
+                {isActionLoading ? <ActivityIndicator color="white" /> : <Text style={styles.saveBtnText}>ENREGISTRER</Text>}
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -356,8 +368,8 @@ const styles = StyleSheet.create({
   floatingAddBtn: { position: 'absolute', bottom: 30, right: 20, left: 20, paddingVertical: 18, borderRadius: 22, elevation: 4, alignItems: 'center' },
   addBtnText: { color: '#fff', fontWeight: '900', fontSize: 15, letterSpacing: 1 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalContent: { borderTopLeftRadius: 35, borderTopRightRadius: 35, padding: 30, paddingBottom: 50 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
+  modalContent: { borderTopLeftRadius: 35, borderTopRightRadius: 35, padding: 25, maxHeight: '85%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 22, fontWeight: '900' },
   modalLabel: { fontSize: 10, fontWeight: '900', color: '#888', marginBottom: 8, letterSpacing: 1 },
   modalInput: { borderWidth: 1.5, borderRadius: 16, padding: 16, marginBottom: 20, fontSize: 16 },

@@ -1,7 +1,8 @@
 /**
  * HomeScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/index.tsx
- * Version : 3.2 - Intégration Badge Marketing (Relance Clients)
+ * Version : 3.3 - Correction Structure & Badges Dynamiques
+ * Règle n°2 : Toujours fournir le code complet.
  */
 
 import React, { useState, useEffect } from "react";
@@ -145,7 +146,7 @@ export default function HomeScreen() {
 
   // --- LOGIQUE DES BADGES ---
   const pendingCount = todayOrders.filter((o: any) => o.status === 'pending').length;
-  // Récupération du compteur marketing depuis le state global (Règle n°3)
+  // MarketingCount vient du state global (calculé dans data-service ou via un effect)
   const marketingCount = state.marketingCount || 0;
 
   const handleUpdatePassword = async () => {
@@ -233,12 +234,15 @@ export default function HomeScreen() {
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Services</Text>
             <View style={styles.actionGrid}>
               {filteredActions.map((action) => {
-                // Détermination dynamique du chiffre pour le badge (Règle n°3)
+                // Détermination du badge
                 let badgeValue = 0;
-                if ((action.route === 'history' || action.route === 'CuisineScreen')) {
+                let badgeColor = '#ef4444'; // Rouge par défaut
+
+                if (action.route === 'history' || action.route === 'CuisineScreen') {
                     badgeValue = pendingCount;
                 } else if (action.route === 'RapportScreen') {
                     badgeValue = marketingCount;
+                    badgeColor = '#F97316'; // Orange pour le marketing
                 }
 
                 return (
@@ -249,7 +253,7 @@ export default function HomeScreen() {
                     activeOpacity={0.8}
                   >
                     {badgeValue > 0 && (
-                      <View style={[styles.badge, action.route === 'RapportScreen' && { backgroundColor: '#F97316' }]}>
+                      <View style={[styles.badge, { backgroundColor: badgeColor }]}>
                         <Text style={styles.badgeText}>{badgeValue}</Text>
                       </View>
                     )}
@@ -297,7 +301,7 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      {/* Modal Profile - Identique à la version précédente */}
+      {/* Modal Profile */}
       <Modal visible={isProfileVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
@@ -401,7 +405,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -5,
     right: -5,
-    backgroundColor: '#ef4444',
     minWidth: 24,
     height: 24,
     borderRadius: 12,
