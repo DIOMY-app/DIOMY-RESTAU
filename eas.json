@@ -7,12 +7,14 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "channel": "development",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://cbcixttozweskkfcxlks.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNiY2l4dHRvendlc2trZmN4bGtzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE2Mjk1MjIsImV4cCI6MjA4NzIwNTUyMn0.raeeEHFY2gVa_ASyIRi_hAiFsnNqpljtGQcY56OO6HQ"
       }
     },
     "preview": {
+      "channel": "preview",
       "android": {
         "buildType": "apk",
         "image": "sdk-51"
@@ -24,6 +26,7 @@
       }
     },
     "production": {
+      "channel": "production",
       "android": {
         "image": "sdk-51"
       },
