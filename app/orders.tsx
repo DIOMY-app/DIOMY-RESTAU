@@ -1,12 +1,12 @@
 /**
  * Orders / Cart Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/orders.tsx
- * Version : 3.6 - Accès Admin Universel & Redirection Menu
+ * Version : 3.7 - Flux de commande fluide & Bouton d'action rapide
  * Règle n°2 : Code complet fourni.
  */
 
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, SafeAreaView } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { ScreenContainer } from '../components/screen-container';
@@ -25,14 +25,13 @@ export default function OrdersScreen() {
   // RÉCUPÉRATION DU PANIER ACTIF
   const activeTab = state.activeTab ?? 0;
   const cart = state.carts[activeTab] || [];
-  
   const user = state.user;
   
-  // CORRECTION : L'Admin a désormais les mêmes droits que le caissier responsable ET le serveur
+  // Droits Admin ou Caissier
   const isCaissierResponsable = user?.id === state.activeCashierId || user?.role === 'admin';
 
   // Calculs financiers
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const subtotal = cart.reduce((sum, item) => sum + (item.price * (item.quantity || 0)), 0);
   const serviceCharge = subtotal * 0.05; 
   const total = subtotal + serviceCharge;
 
@@ -49,7 +48,7 @@ export default function OrdersScreen() {
   };
 
   /**
-   * LOGIQUE DE DÉSTOCKAGE PAR RECETTE
+   * LOGIQUE DE DÉSTOCKAGE
    */
   const processDestocking = async () => {
     try {
@@ -64,19 +63,16 @@ export default function OrdersScreen() {
         if (recipe && recipe.length > 0) {
           for (const ingredient of recipe) {
             const totalToDeduct = ingredient.quantite_consommee * item.quantity;
-            const { error: rpcError } = await supabase.rpc('deduire_stock', {
+            await supabase.rpc('deduire_stock', {
               item_id: ingredient.stock_id,
               qty_to_subtract: totalToDeduct
             });
-            if (rpcError) {
-                console.error(`Erreur stock pour ${item.name}:`, rpcError);
-            }
           }
         }
       }
       return true;
     } catch (error) {
-      console.error("Erreur déstockage globale:", error);
+      console.error("Erreur déstockage:", error);
       return false;
     }
   };
@@ -84,14 +80,13 @@ export default function OrdersScreen() {
   const handleValidation = async () => {
     if (cart.length === 0 || isProcessing) return;
 
-    // L'admin peut choisir de valider directement ou d'envoyer en cuisine
     const actionText = isCaissierResponsable ? "Valider le paiement" : "Envoyer en cuisine";
 
     Alert.alert(
-      "Confirmation",
-      `${actionText} ?\nTotal : ${formatPrice(total)}`,
+      "Confirmer l'action",
+      `${actionText} pour un montant de ${formatPrice(total)} ?`,
       [
-        { text: "Modifier", style: "cancel" },
+        { text: "Annuler", style: "cancel" },
         { 
           text: "Confirmer", 
           onPress: async () => {
@@ -123,14 +118,10 @@ export default function OrdersScreen() {
               dispatch({ type: 'CLEAR_CART' });
               await refreshAppData(dispatch);
               
-              Alert.alert(
-                  isCaissierResponsable ? "Vente Terminée ✅" : "Commande Transmise 👨‍🍳", 
-                  isCaissierResponsable ? "Le stock a été mis à jour." : "La cuisine a reçu le bon."
-              );
-              
+              Alert.alert("Succès ✅", isCaissierResponsable ? "Vente encaissée !" : "Bon envoyé en cuisine !");
               router.replace('/'); 
             } catch (err: any) {
-              Alert.alert("Erreur Critique", err.message);
+              Alert.alert("Erreur", err.message);
             } finally {
               setIsProcessing(false);
             }
@@ -143,10 +134,19 @@ export default function OrdersScreen() {
   return (
     <ScreenContainer>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.title, { color: colors.foreground }]}>Panier Client {activeTab + 1}</Text>
-        <View style={[styles.roleBadge, { backgroundColor: isCaissierResponsable ? '#dcfce7' : '#dbeafe' }]}>
-            <Text style={{ color: isCaissierResponsable ? '#166534' : '#1e40af', fontWeight: 'bold', fontSize: 12 }}>
-                {isCaissierResponsable ? "Mode Admin / Encaisssement" : "Mode Prise de Commande"}
+        <View style={styles.headerTop}>
+          <Text style={[styles.title, { color: colors.foreground }]}>Panier #{activeTab + 1}</Text>
+          <TouchableOpacity 
+            style={[styles.addMoreBtn, { backgroundColor: colors.primary + '15' }]}
+            onPress={() => router.push('/menu' as any)}
+          >
+            <Text style={{ color: colors.primary, fontWeight: 'bold' }}>+ Ajouter des plats</Text>
+          </TouchableOpacity>
+        </View>
+        
+        <View style={[styles.roleBadge, { backgroundColor: isCaissierResponsable ? '#dcfce7' : '#fff7ed' }]}>
+            <Text style={{ color: isCaissierResponsable ? '#166534' : '#c2410c', fontWeight: '800', fontSize: 11, textTransform: 'uppercase' }}>
+                {isCaissierResponsable ? "💳 Mode Encaisssement" : "📝 Mode Prise de Commande"}
             </Text>
         </View>
       </View>
@@ -158,17 +158,16 @@ export default function OrdersScreen() {
               <View style={styles.itemInfo}>
                 <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
                 <Text style={[styles.itemPrice, { color: colors.muted }]}>
-                  {formatPrice(item.price)} / unité
+                  {formatPrice(item.price)}
                 </Text>
               </View>
               
               <View style={styles.controls}>
                 <TouchableOpacity 
                   onPress={() => updateQuantity(item.id, item.quantity, -1)}
-                  style={[styles.btn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]}
-                  disabled={isProcessing}
+                  style={[styles.btn, { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }]}
                 >
-                  <Text style={{ color: colors.foreground, fontSize: 20 }}>-</Text>
+                  <Text style={{ color: colors.foreground, fontSize: 18, fontWeight: 'bold' }}>-</Text>
                 </TouchableOpacity>
                 
                 <Text style={[styles.qty, { color: colors.foreground }]}>{item.quantity}</Text>
@@ -176,24 +175,27 @@ export default function OrdersScreen() {
                 <TouchableOpacity 
                   onPress={() => updateQuantity(item.id, item.quantity, 1)}
                   style={[styles.btn, { backgroundColor: colors.primary }]}
-                  disabled={isProcessing}
                 >
-                  <Text style={{ color: '#fff', fontSize: 20 }}>+</Text>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>+</Text>
                 </TouchableOpacity>
               </View>
             </View>
           ))
         ) : (
           <View style={styles.emptyContainer}>
-            <Text style={{ fontSize: 60, marginBottom: 20 }}>🛒</Text>
-            <Text style={[styles.emptyText, { color: colors.muted }]}>Aucun article sélectionné</Text>
+            <View style={styles.emptyIconContainer}>
+                <Text style={{ fontSize: 50 }}>🍲</Text>
+            </View>
+            <Text style={[styles.emptyText, { color: colors.foreground }]}>Votre panier est vide</Text>
+            <Text style={{ color: colors.muted, textAlign: 'center', marginBottom: 30 }}>
+              Commencez par sélectionner des plats dans le menu.
+            </Text>
+            
             <TouchableOpacity 
-              onPress={() => router.push('/' as any)} // Retour à l'écran principal (Caisse/Menu)
-              style={styles.emptyBtn}
+              onPress={() => router.push('/menu' as any)}
+              style={[styles.mainMenuBtn, { backgroundColor: colors.primary }]}
             >
-              <Text style={{ color: colors.primary, fontWeight: '900', fontSize: 16 }}>
-                ALLER AU MENU POUR PRENDRE COMMANDE
-              </Text>
+              <Text style={styles.mainMenuBtnText}>OUVRIR LE MENU</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -203,15 +205,15 @@ export default function OrdersScreen() {
         <View style={[styles.footer, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
           <View style={styles.summaryRow}>
             <Text style={{ color: colors.muted, fontSize: 15 }}>Sous-total</Text>
-            <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: '600' }}>{formatPrice(subtotal)}</Text>
+            <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: '700' }}>{formatPrice(subtotal)}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={{ color: colors.muted, fontSize: 15 }}>Frais de service (5%)</Text>
-            <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: '600' }}>{formatPrice(serviceCharge)}</Text>
+            <Text style={{ color: colors.muted, fontSize: 15 }}>Service (5%)</Text>
+            <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: '700' }}>{formatPrice(serviceCharge)}</Text>
           </View>
           
           <View style={[styles.totalRow, { borderTopColor: colors.border }]}>
-            <Text style={[styles.totalText, { color: colors.foreground }]}>NET À PAYER</Text>
+            <Text style={[styles.totalText, { color: colors.foreground }]}>TOTAL</Text>
             <Text style={[styles.totalAmount, { color: colors.primary }]}>{formatPrice(total)}</Text>
           </View>
 
@@ -224,7 +226,7 @@ export default function OrdersScreen() {
               <ActivityIndicator color="white" />
             ) : (
               <Text style={styles.submitBtnText}>
-                  {isCaissierResponsable ? "VALIDER & ENCAISSER" : "ENVOYER LE BON EN CUISINE"}
+                  {isCaissierResponsable ? "ENCAISSER MAINTENANT" : "ENVOYER EN CUISINE"}
               </Text>
             )}
           </TouchableOpacity>
@@ -235,25 +237,29 @@ export default function OrdersScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: { padding: 25, paddingBottom: 15, borderBottomWidth: 1 },
-  title: { fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
-  roleBadge: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20, marginTop: 8 },
-  list: { paddingHorizontal: 25, paddingBottom: 100 },
-  item: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 20, borderBottomWidth: 1 },
+  header: { padding: 25, paddingBottom: 20, borderBottomWidth: 1 },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  title: { fontSize: 28, fontWeight: '900', letterSpacing: -1 },
+  addMoreBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  roleBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginTop: 10 },
+  list: { paddingHorizontal: 25, paddingBottom: 40 },
+  item: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 18, borderBottomWidth: 1 },
   itemInfo: { flex: 1 },
-  itemName: { fontSize: 17, fontWeight: '800' },
-  itemPrice: { fontSize: 14, marginTop: 4, fontWeight: '500' },
-  controls: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-  btn: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', elevation: 2 },
-  qty: { fontSize: 18, fontWeight: '900', minWidth: 20, textAlign: 'center' },
-  footer: { padding: 25, borderTopWidth: 1, paddingBottom: 45, borderTopLeftRadius: 35, borderTopRightRadius: 35, elevation: 25, shadowColor: '#000', shadowOffset: {width: 0, height: -12}, shadowOpacity: 0.1, shadowRadius: 15 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, paddingTop: 20, borderTopWidth: 1.5 },
-  totalText: { fontSize: 18, fontWeight: '900', letterSpacing: 0.5 },
+  itemName: { fontSize: 17, fontWeight: '800', marginBottom: 2 },
+  itemPrice: { fontSize: 14, fontWeight: '600' },
+  controls: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  btn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  qty: { fontSize: 17, fontWeight: '900', minWidth: 25, textAlign: 'center' },
+  footer: { padding: 25, borderTopWidth: 1, paddingBottom: 40, borderTopLeftRadius: 30, borderTopRightRadius: 30, elevation: 20, shadowColor: '#000', shadowOffset: {width: 0, height: -10}, shadowOpacity: 0.1, shadowRadius: 10 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 15, borderTopWidth: 1.5 },
+  totalText: { fontSize: 16, fontWeight: '900' },
   totalAmount: { fontSize: 26, fontWeight: '900' },
-  submitBtn: { borderRadius: 20, paddingVertical: 20, alignItems: 'center', marginTop: 25, elevation: 4 },
-  submitBtnText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 1 },
-  emptyContainer: { alignItems: 'center', marginTop: 100 },
-  emptyText: { fontSize: 20, fontWeight: '700' },
-  emptyBtn: { marginTop: 20, padding: 20, alignItems: 'center', borderWidth: 2, borderRadius: 15, borderStyle: 'dashed' }
+  submitBtn: { borderRadius: 18, paddingVertical: 18, alignItems: 'center', marginTop: 20, elevation: 4 },
+  submitBtnText: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
+  emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 80, paddingHorizontal: 20 },
+  emptyIconContainer: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  emptyText: { fontSize: 22, fontWeight: '800', marginBottom: 10 },
+  mainMenuBtn: { width: '100%', paddingVertical: 20, borderRadius: 15, alignItems: 'center' },
+  mainMenuBtnText: { color: 'white', fontWeight: '900', fontSize: 16, letterSpacing: 1 }
 });
