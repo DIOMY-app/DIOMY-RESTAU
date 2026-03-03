@@ -1,8 +1,8 @@
 /**
  * Root Layout - O'PIED DU MONT Mobile
  * Emplacement : /app/_layout.tsx
- * Gère l'initialisation globale et la structure des Providers
- * Version : Ajout du chargement des données de rentabilité et charges fixes
+ * Gère l'initialisation globale et le calcul du Badge Marketing
+ * Version : 1.4 - Ajout du compteur de relance client
  */
 
 import { useEffect, useState } from 'react';
@@ -10,18 +10,15 @@ import { Slot } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { View, ActivityIndicator } from 'react-native';
 
-// Importations recalibrées sur ta structure racine (Règle n°3)
 // @ts-ignore
 import { AppProvider, useApp } from '../app-context'; 
 // @ts-ignore
 import { CartProvider } from '../context/cart-context'; 
 // @ts-ignore
 import { supabase } from '../supabase';
+import { Order } from '../types';
 
-// Empêche le splash screen de se cacher automatiquement au démarrage
-SplashScreen.preventAutoHideAsync().catch(() => {
-  /* ignore errors */
-});
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AppInitializer() {
   const { dispatch } = useApp();
@@ -32,28 +29,43 @@ function AppInitializer() {
       try {
         dispatch({ type: 'SET_LOADING', payload: true });
 
-        // Chargement des données essentielles depuis Supabase
-        // Ajout des tables de charges et rentabilité pour le Tchiep et autres plats
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Date charnière pour le marketing (15 jours en arrière)
+        const fifteenDaysAgo = new Date();
+        fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+
         const [
           { data: categories, error: catError },
           { data: menu, error: menuError },
           { data: stock, error: stockError },
           { data: employes, error: empError },
           { data: charges, error: chargesError },
-          { data: rentabilite, error: rentError }
+          { data: rentabilite, error: rentError },
+          { data: ventes, error: ventesError },
+          // REQUÊTE MARKETING : Compter les clients inactifs
+          { count: marketingCount, error: markError }
         ] = await Promise.all([
           supabase.from('categories').select('*').order('nom'),
           supabase.from('menu').select('*').order('nom'),
           supabase.from('stock').select('*').order('nom'),
-          supabase.from('employes').select('*').order('nom'),
+          supabase.from('employes').select('*').order('nom'), 
           supabase.from('charges_fixes').select('*'),
-          supabase.from('rentabilite_plats').select('*')
+          supabase.from('rentabilite_plats').select('*'),
+          supabase.from('ventes').select('*').gte('creee_a', today.toISOString()).order('creee_a', { ascending: false }),
+          // On ne récupère que le nombre (count) pour optimiser
+          supabase.from('clients')
+            .select('*', { count: 'exact', head: true })
+            .lt('derniere_visite', fifteenDaysAgo.toISOString())
+            .eq('actif', true)
         ]);
 
-        if (catError || menuError || stockError || empError || chargesError || rentError) {
-          console.warn("Certaines données n'ont pas pu être chargées, vérifiez la connexion ou les tables SQL.");
+        if (catError || menuError || stockError || empError || chargesError || rentError || ventesError || markError) {
+          console.warn("Erreurs lors du chargement des données.");
         }
 
+        // Mise à jour du state global
         dispatch({
           type: 'SET_DATA',
           payload: {
@@ -61,42 +73,46 @@ function AppInitializer() {
             menuItems: menu || [],
             stockItems: stock || [],
             employees: employes || [],
-            // On peut ajouter ces données au state global si ton Reducer est prêt
             chargesFixes: charges || [],
-            rentabilitePlats: rentabilite || []
+            rentabilitePlats: rentabilite || [],
+            orders: (ventes || []) as Order[] 
           }
         });
 
+        // Mise à jour spécifique du compteur marketing
+        // Note: Assure-toi que cette action existe dans ton reducer
+        dispatch({ type: 'SET_MARKETING_COUNT', payload: marketingCount || 0 });
+
       } catch (error: any) {
         dispatch({ type: 'SET_ERROR', payload: error.message });
-        console.error("Erreur d'initialisation critique:", error.message);
       } finally {
         dispatch({ type: 'SET_LOADING', payload: false });
         setIsReady(true);
-        // On cache le splash screen maintenant que tout est prêt
         await SplashScreen.hideAsync().catch(() => {});
       }
     };
 
     loadInitialData();
 
-    // Gestion du temps réel pour le stock et les charges
-    const stockSubscription = supabase
-      .channel('db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock' }, () => {
-        // Rafraîchir si nécessaire
+    // TEMPS RÉEL : Mettre à jour le badge si un client est enregistré
+    const marketingSubscription = supabase
+      .channel('marketing-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, () => {
+        // Optionnel : Relancer loadInitialData ou une fonction légère de comptage
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'charges_fixes' }, () => {
-        // Rafraîchir les charges en temps réel
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ventes' }, (payload) => {
+        dispatch({ type: 'ADD_ORDER', payload: payload.new as Order });
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'ventes' }, (payload) => {
+        dispatch({ type: 'UPDATE_ORDER', payload: payload.new as Order });
       })
       .subscribe();
 
     return () => {
-      supabase.removeChannel(stockSubscription);
+      supabase.removeChannel(marketingSubscription);
     };
   }, [dispatch]);
 
-  // Si l'app n'est pas prête, on affiche un indicateur de chargement de secours
   if (!isReady) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#ffffff' }}>

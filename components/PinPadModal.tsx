@@ -1,13 +1,12 @@
 /**
  * PinPadModal - Clavier de sécurité pour O'PIED DU MONT
- * Version optimisée : Identification locale via AppContext et thématisation complète.
+ * Emplacement : /components/PinPadModal.tsx
+ * Version : Corrigée (Erreur TS Property 'name' does not exist)
  */
 
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Modal, StyleSheet, Alert } from 'react-native';
-// @ts-ignore
 import { useApp } from '../app-context';
-// @ts-ignore
 import { useColors } from '../hooks/use-colors';
 
 interface PinPadModalProps {
@@ -26,7 +25,7 @@ export default function PinPadModal({ visible, onClose, onSuccess }: PinPadModal
       const newPin = pin + num;
       setPin(newPin);
       
-      // Si on atteint 4 chiffres, on vérifie localement
+      // Si on atteint 4 chiffres, on déclenche la vérification
       if (newPin.length === 4) {
         verifyPinLocally(newPin);
       }
@@ -34,19 +33,28 @@ export default function PinPadModal({ visible, onClose, onSuccess }: PinPadModal
   };
 
   /**
-   * Vérification ultra-rapide dans la liste des employés chargée au démarrage
+   * Vérification locale basée sur les données chargées dans le contexte
    */
   const verifyPinLocally = (code: string) => {
-    // Note : Dans votre base SQL, assurez-vous que la colonne est 'code_pin'
-    // Ici on simule la recherche sur le state global
-    const employee = state.employees.find((emp: any) => emp.code_pin === code && emp.est_actif);
+    // On s'assure que employees est un tableau
+    const employees = state.employees || [];
+    
+    // Recherche de l'employé avec le PIN correspondant et le statut actif
+    // Utilisation de 'nom' uniquement pour corriger l'erreur TS 2339
+    const employee = employees.find((emp: any) => 
+      emp.pin === code && (emp.actif === true || emp.actif === undefined)
+    );
 
     if (employee) {
+      // On utilise 'nom' car c'est la propriété définie dans ton type Employee
       onSuccess(employee.nom);
       setPin('');
     } else {
-      Alert.alert('Accès Refusé', 'Code PIN incorrect ou employé non autorisé.');
-      setPin('');
+      Alert.alert(
+        'Accès Refusé', 
+        'Code PIN incorrect ou compte employé désactivé.',
+        [{ text: 'Réessayer', onPress: () => setPin('') }]
+      );
     }
   };
 
@@ -76,29 +84,37 @@ export default function PinPadModal({ visible, onClose, onSuccess }: PinPadModal
 
           {/* Grille du pavé numérique */}
           <View style={styles.grid}>
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((btn) => (
-              <TouchableOpacity
-                key={btn}
-                style={[
-                  styles.button, 
-                  { backgroundColor: colors.background },
-                  (btn === 'C' || btn === '⌫') && { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }
-                ]}
-                onPress={() => {
-                  if (btn === 'C') setPin('');
-                  else if (btn === '⌫') handleDelete();
-                  else handlePress(btn);
-                }}
-              >
-                <Text style={[
-                  styles.buttonText, 
-                  { color: colors.foreground },
-                  (btn === 'C' || btn === '⌫') && { fontSize: 18, color: colors.error }
-                ]}>
-                  {btn}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((btn) => {
+              const isSpecial = btn === 'C' || btn === '⌫';
+              
+              return (
+                <TouchableOpacity
+                  key={btn}
+                  style={[
+                    styles.button, 
+                    { backgroundColor: colors.background },
+                    isSpecial && { 
+                      backgroundColor: colors.surface, 
+                      borderWidth: 1, 
+                      borderColor: colors.border 
+                    }
+                  ]}
+                  onPress={() => {
+                    if (btn === 'C') setPin('');
+                    else if (btn === '⌫') handleDelete();
+                    else handlePress(btn);
+                  }}
+                >
+                  <Text style={[
+                    styles.buttonText, 
+                    { color: colors.foreground },
+                    isSpecial && { fontSize: 18, color: '#ef4444' }
+                  ]}>
+                    {btn}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
@@ -113,7 +129,7 @@ export default function PinPadModal({ visible, onClose, onSuccess }: PinPadModal
 const styles = StyleSheet.create({
   overlay: { 
     flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.7)', 
+    backgroundColor: 'rgba(0,0,0,0.75)', 
     justifyContent: 'center', 
     alignItems: 'center' 
   },
@@ -132,7 +148,8 @@ const styles = StyleSheet.create({
     fontSize: 22, 
     fontWeight: '900', 
     marginBottom: 24,
-    letterSpacing: 0.5
+    letterSpacing: 0.5,
+    textAlign: 'center'
   },
   dotsContainer: { 
     flexDirection: 'row', 
@@ -157,7 +174,6 @@ const styles = StyleSheet.create({
     borderRadius: 25, 
     justifyContent: 'center', 
     alignItems: 'center',
-    // Petit effet de relief pour le tactile
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -174,7 +190,7 @@ const styles = StyleSheet.create({
   },
   cancelText: { 
     fontWeight: '700', 
-    fontSize: 16,
+    fontSize: 14,
     textTransform: 'uppercase',
     letterSpacing: 1
   }

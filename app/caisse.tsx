@@ -1,7 +1,7 @@
 /**
  * CaisseScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/caisse.tsx
- * Version Intégrale : Multi-Clients + WhatsApp + CRM Clients
+ * Version Intégrale : Gestion Caissière Active + Multi-Clients + WhatsApp Automatique + Fidélité
  */
 
 import React, { useState, useEffect } from 'react';
@@ -22,7 +22,7 @@ import { formatPrice } from '../formatting';
 const RESTAURANT_INFO = {
   name: "O'PIED DU MONT",
   location: "Korhogo, Quartier Résidentiel",
-  phone: "+225 07 07 00 00 00",
+  phone: "+225 07 99 60 83 49", // Numéro mis à jour selon votre demande
 };
 
 type PaymentMethod = 'especes' | 'wave' | 'orange_money' | 'carte';
@@ -33,9 +33,15 @@ export default function CaisseScreen() {
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPinVisible, setIsPinVisible] = useState(false);
+  const [isSwitchingCashier, setIsSwitchingCashier] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('Tous');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('especes');
   const [clientPhone, setClientPhone] = useState('');
+
+  // Logique de responsabilité
+  const activeCashierId = state.activeCashierId;
+  const isUserResponsible = state.user?.id === activeCashierId;
+  const activeCashierName = state.employees.find(e => e.id === activeCashierId)?.nom || "Aucune";
 
   // Gestion Multi-Paniers
   const activeTab = state.activeTab ?? 0;
@@ -65,6 +71,15 @@ export default function CaisseScreen() {
     }
   };
 
+  const handleSwitchCashier = (employeeName: string) => {
+    const employee = state.employees.find(e => e.nom === employeeName);
+    if (employee) {
+      dispatch({ type: 'SWITCH_CASHIER', payload: employee.id });
+      setIsSwitchingCashier(false);
+      Alert.alert("Succès", `${employeeName} est maintenant garante de la caisse.`);
+    }
+  };
+
   const handleAddItem = (item: MenuItem) => {
     dispatch({
       type: 'ADD_TO_CART',
@@ -86,23 +101,37 @@ export default function CaisseScreen() {
     }
   };
 
-  const sendWhatsAppReceipt = (transactionId: string | number, phone: string) => {
+  const handleSimpleSendToKitchen = async () => {
+    setIsSubmitting(true);
+    try {
+      await sendToKitchen(0, 0, currentCart);
+      Alert.alert("Transmis 👨‍🍳", "La commande a été envoyée en cuisine. La caissière pourra valider le paiement.");
+      dispatch({ type: 'CLEAR_CART' });
+    } catch (error: any) {
+      Alert.alert("Erreur", error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Fonction d'envoi WhatsApp
+  const sendWhatsAppReceipt = (transactionId: string | number, phone: string, items: any[], total: number) => {
     const now = new Date();
-    const dateStr = now.toISOString().split('T')[0]; 
+    const dateStr = now.toLocaleDateString('fr-FR');
     const safeId = transactionId ? transactionId.toString().slice(-6).toUpperCase() : '000000';
 
     let message = `*🏔️ O'PIED DU MONT 🍴*\n_L'excellence à Korhogo_\n`;
     message += `--------------------------\n`;
-    message += `*REÇU #${safeId}*\n`;
+    message += `*REÇU DE PAIEMENT #${safeId}*\n`;
     message += `📅 ${dateStr}\n`;
     message += `💳 PAIEMENT : ${paymentMethod.toUpperCase()}\n`;
     message += `--------------------------\n\n`;
 
-    currentCart.forEach(item => {
+    items.forEach(item => {
       message += `• ${item.quantity}x ${item.name} : ${safeFormatPrice(item.price * item.quantity)}\n`;
     });
 
-    message += `\n*TOTAL : ${safeFormatPrice(cartTotal)}*\n`;
+    message += `\n*TOTAL : ${safeFormatPrice(total)}*\n`;
     message += `--------------------------\n`;
     message += `Merci de votre confiance ! À bientôt.`;
 
@@ -121,6 +150,11 @@ export default function CaisseScreen() {
     setIsPinVisible(false);
     setIsSubmitting(true);
     
+    // Sauvegarde des données locales pour le WhatsApp (car le dispatch vide le panier)
+    const itemsForReceipt = [...currentCart];
+    const totalForReceipt = cartTotal;
+    const phoneToUse = clientPhone;
+
     try {
       const itemsForSql = currentCart.map(item => ({
         nom: item.name,
@@ -129,32 +163,52 @@ export default function CaisseScreen() {
       }));
 
       let linkedClientId = null;
+      if (phoneToUse.trim().length >= 8) {
+        const cleanPhone = phoneToUse.replace(/\s/g, '');
 
-      // CRM : Gestion du client
-      if (clientPhone.trim().length >= 8) {
-        const cleanPhone = clientPhone.replace(/\s/g, '');
-        const { data: clientData, error: clientError } = await supabase
+        // Recherche client pour mise à jour stats
+        const { data: existingClient } = await supabase
           .from('clients')
-          .upsert({ 
-            telephone: cleanPhone, 
-            derniere_visite: new Date().toISOString(),
-            nom: 'Client Passager' 
-          }, { onConflict: 'telephone' })
-          .select('id')
+          .select('id, total_depense, nombre_visites')
+          .eq('telephone', cleanPhone)
           .single();
 
-        if (!clientError && clientData) linkedClientId = clientData.id;
+        if (existingClient) {
+          const { data: updatedClient } = await supabase
+            .from('clients')
+            .update({ 
+              derniere_visite: new Date().toISOString(),
+              total_depense: (existingClient.total_depense || 0) + totalForReceipt,
+              nombre_visites: (existingClient.nombre_visites || 0) + 1
+            })
+            .eq('id', existingClient.id)
+            .select('id').single();
+          if (updatedClient) linkedClientId = updatedClient.id;
+        } else {
+          // Création si nouveau
+          const { data: newClient } = await supabase
+            .from('clients')
+            .insert([{ 
+              telephone: cleanPhone, 
+              derniere_visite: new Date().toISOString(),
+              nom: 'Client Passager',
+              total_depense: totalForReceipt,
+              nombre_visites: 1
+            }])
+            .select('id').single();
+          if (newClient) linkedClientId = newClient.id;
+        }
       }
 
       const { data: transactionData, error: transactionError } = await supabase
         .from('transactions')
         .insert([{
-          montant_total: cartTotal,
-          sous_total: cartTotal,
+          montant_total: totalForReceipt,
+          sous_total: totalForReceipt,
           mode_paiement: paymentMethod,
           items: itemsForSql, 
           caissier: employeeName,
-          client_contact: clientPhone, 
+          client_contact: phoneToUse, 
           client_id: linkedClientId,
           creee_a: new Date().toISOString(),
           payee_a: new Date().toISOString()
@@ -163,29 +217,24 @@ export default function CaisseScreen() {
 
       if (transactionError) throw transactionError;
 
-      // Déduction stock et envoi cuisine
       await Promise.allSettled([
-        deductStockFromOrder(currentCart),
-        sendToKitchen(transactionData.id, null, currentCart)
+        deductStockFromOrder(itemsForReceipt),
+        sendToKitchen(transactionData.id, 0, itemsForReceipt)
       ]);
 
       const tId = transactionData.id;
-      const savedPhone = clientPhone;
       
+      // Nettoyage de l'interface
       dispatch({ type: 'CLEAR_CART' });
       setClientPhone('');
+      refreshAppData(dispatch);
       
-      Alert.alert(
-        'Vente Validée ✅',
-        `Transaction #${tId.toString().slice(-4)} réussie.`,
-        [
-          { text: 'OK', onPress: () => refreshAppData(dispatch) },
-          { text: 'WhatsApp', onPress: () => {
-              sendWhatsAppReceipt(tId, savedPhone);
-              refreshAppData(dispatch);
-          }}
-        ]
-      );
+      // AUTOMATISATION : Envoi immédiat si numéro présent
+      if (phoneToUse.trim().length >= 8) {
+        sendWhatsAppReceipt(tId, phoneToUse, itemsForReceipt, totalForReceipt);
+      } else {
+        Alert.alert('Vente Validée ✅', `Transaction #${tId.toString().slice(-4)} réussie.`);
+      }
 
     } catch (error: any) {
       Alert.alert('Erreur', error.message);
@@ -209,15 +258,30 @@ export default function CaisseScreen() {
         onSuccess={processFinalOrder}
       />
 
+      <PinPadModal 
+        visible={isSwitchingCashier}
+        onClose={() => setIsSwitchingCashier(false)}
+        onSuccess={handleSwitchCashier}
+      />
+
       <View style={styles.mainContainer}>
         {/* SECTION GAUCHE : MENU */}
         <View style={styles.menuSection}>
           <View style={styles.headerRow}>
             <Image source={require('../assets/logo.png')} style={styles.logoApp} resizeMode="contain" />
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={[styles.title, { color: colors.foreground }]}>{RESTAURANT_INFO.name}</Text>
-              <Text style={{ color: colors.muted, fontSize: 12 }}>Korhogo • Multi-Clients Actifs</Text>
+              <View style={styles.cashierBadge}>
+                 <Text style={{ color: colors.muted, fontSize: 12 }}>Garante : </Text>
+                 <Text style={{ color: colors.primary, fontWeight: '900', fontSize: 12 }}>{activeCashierName}</Text>
+              </View>
             </View>
+            <TouchableOpacity 
+              style={[styles.switchBtn, { borderColor: colors.primary }]}
+              onPress={() => setIsSwitchingCashier(true)}
+            >
+              <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>PRENDRE LA CAISSE</Text>
+            </TouchableOpacity>
           </View>
           
           <View style={{ height: 60 }}>
@@ -262,7 +326,6 @@ export default function CaisseScreen() {
         {/* SECTION DROITE : PANIER MULTI-CLIENTS */}
         <View style={[styles.cartSidebar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           
-          {/* SÉLECTEUR DE CLIENT (ONGLETS) */}
           <View style={styles.tabContainer}>
             {[0, 1, 2].map(idx => (
               <TouchableOpacity
@@ -322,7 +385,7 @@ export default function CaisseScreen() {
           </ScrollView>
 
           <View style={styles.marketingContainer}>
-            <Text style={[styles.marketingLabel, { color: colors.muted }]}>CONTACT CLIENT (WHATSAPP)</Text>
+            <Text style={[styles.marketingLabel, { color: colors.muted }]}>CONTACT CLIENT (WHATSAPP AUTO)</Text>
             <TextInput
               style={[styles.phoneInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
               placeholder="Ex: 0708091011"
@@ -348,10 +411,11 @@ export default function CaisseScreen() {
                     { 
                         backgroundColor: paymentMethod === m ? colors.primary : colors.background,
                         borderColor: paymentMethod === m ? colors.primary : colors.border,
-                        borderWidth: 1.5
+                        borderWidth: 1.5,
+                        opacity: isUserResponsible ? 1 : 0.5
                     }
                   ]}
-                  onPress={() => setPaymentMethod(m)}
+                  onPress={() => isUserResponsible && setPaymentMethod(m)}
                 >
                   <Text style={{ 
                     color: paymentMethod === m ? 'white' : colors.foreground, 
@@ -362,19 +426,23 @@ export default function CaisseScreen() {
               ))}
             </View>
 
-            <TouchableOpacity
-              style={[
-                styles.validateBtn, 
-                { 
-                    backgroundColor: '#22c55e', 
-                    opacity: (isSubmitting || currentCart.length === 0) ? 0.5 : 1 
-                }
-              ]}
-              onPress={() => { if(currentCart.length > 0) setIsPinVisible(true); }}
-              disabled={isSubmitting || currentCart.length === 0}
-            >
-              <Text style={{ color: 'white', fontWeight: '900', fontSize: 16 }}>VALIDER (CLIENT {activeTab + 1})</Text>
-            </TouchableOpacity>
+            {isUserResponsible ? (
+              <TouchableOpacity
+                style={[styles.validateBtn, { backgroundColor: '#22c55e', opacity: (isSubmitting || currentCart.length === 0) ? 0.5 : 1 }]}
+                onPress={() => { if(currentCart.length > 0) setIsPinVisible(true); }}
+                disabled={isSubmitting || currentCart.length === 0}
+              >
+                <Text style={{ color: 'white', fontWeight: '900', fontSize: 16 }}>VALIDER PAIEMENT</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.validateBtn, { backgroundColor: '#3b82f6', opacity: (isSubmitting || currentCart.length === 0) ? 0.5 : 1 }]}
+                onPress={() => { if(currentCart.length > 0) handleSimpleSendToKitchen(); }}
+                disabled={isSubmitting || currentCart.length === 0}
+              >
+                <Text style={{ color: 'white', fontWeight: '900', fontSize: 16 }}>ENVOYER EN CUISINE</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
@@ -390,6 +458,8 @@ const styles = StyleSheet.create({
   logoApp: { width: 50, height: 50, borderRadius: 14 },
   menuSection: { flex: 1 },
   title: { fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
+  cashierBadge: { flexDirection: 'row', alignItems: 'center' },
+  switchBtn: { borderWidth: 1.5, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
   categoryList: { gap: 10, paddingVertical: 10 },
   categoryBadge: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, justifyContent: 'center' },
   menuItemCard: { flex: 0.5, borderRadius: 18, padding: 16, borderWidth: 1.5, marginBottom: 12, justifyContent: 'space-between', height: 110, elevation: 2 },

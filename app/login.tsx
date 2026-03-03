@@ -1,13 +1,13 @@
 /**
  * Login Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/login.tsx
- * Correction : Alignement des colonnes (actif au lieu de est_actif)
+ * Version : Corrigée (Colonne 'actif' + Validation CI)
  */
 
 import React, { useState } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, ScrollView, 
-  ActivityIndicator, StyleSheet, SafeAreaView, Alert 
+  ActivityIndicator, StyleSheet, SafeAreaView, Alert, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -15,7 +15,7 @@ import { useApp } from '../app-context';
 import { useColors } from '../hooks/use-colors';
 import { supabase } from '../supabase';
 
-// Validation du format ivoirien (10 chiffres)
+// Validation du format ivoirien (10 chiffres sans espaces)
 const isValidPhone = (phone: string) => /^[0-9]{10}$/.test(phone.replace(/\s/g, ''));
 
 export default function LoginScreen() {
@@ -32,47 +32,55 @@ export default function LoginScreen() {
     setError(null);
     const cleanPhone = phone.replace(/\s/g, '');
 
-    if (!isValidPhone(cleanPhone)) {
-      setError('Veuillez entrer un numéro valide (10 chiffres)');
+    // Validations de base
+    if (!cleanPhone) {
+      setError('Veuillez entrer votre numéro de téléphone');
       return;
     }
 
-    if (password.length < 4) {
-      setError('Le mot de passe est trop court');
+    if (!isValidPhone(cleanPhone)) {
+      setError('Le numéro doit comporter 10 chiffres (ex: 07...)');
+      return;
+    }
+
+    if (!password) {
+      setError('Veuillez entrer votre mot de passe');
       return;
     }
 
     setIsLoading(true);
 
     try {
-      // 1. Recherche de l'employé
+      // 1. Recherche de l'employé dans la table 'employes'
       const { data: employee, error: dbError } = await supabase
         .from('employes')
         .select('*')
         .eq('telephone', cleanPhone)
         .maybeSingle();
 
-      if (dbError || !employee) {
-        setError('Compte introuvable ou numéro incorrect');
+      if (dbError) throw dbError;
+
+      if (!employee) {
+        setError('Aucun compte associé à ce numéro');
         setIsLoading(false);
         return;
       }
 
-      // 2. Vérification du statut du compte (CORRIGÉ : 'actif' au lieu de 'est_actif')
+      // 2. Vérification du statut du compte (Colonne corrigée : actif)
       if (employee.actif === false) {
-        setError('Ce compte est désactivé. Contactez la direction.');
+        setError('Ce compte a été désactivé par l\'administrateur');
         setIsLoading(false);
         return;
       }
 
-      // 3. Vérification du mot de passe
+      // 3. Vérification du mot de passe (Comparaison directe selon ton schéma actuel)
       if (employee.password !== password) {
         setError('Mot de passe incorrect');
         setIsLoading(false);
         return;
       }
       
-      // 4. Mise à jour du contexte global
+      // 4. Succès : Mise à jour du contexte global
       dispatch({
         type: 'SET_USER',
         payload: {
@@ -85,12 +93,12 @@ export default function LoginScreen() {
         },
       });
 
-      // 5. Redirection vers l'accueil
+      // 5. Redirection vers l'accueil (index)
       router.replace('/');
       
-    } catch (err) {
-      console.error("Erreur Login:", err);
-      setError('Une erreur réseau est survenue.');
+    } catch (err: any) {
+      console.error("Erreur Login:", err.message);
+      setError('Erreur de connexion au serveur. Vérifiez votre internet.');
     } finally {
       setIsLoading(false);
     }
@@ -98,75 +106,103 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        <View style={styles.innerContainer}>
-          
-          <View style={styles.header}>
-            <Text style={[styles.logo, { color: colors.primary }]}>O'PIED DU MONT</Text>
-            <Text style={[styles.subtitle, { color: colors.muted, fontWeight: '800' }]}>ESPACE PERSONNEL</Text>
-          </View>
-
-          {error && (
-            <View style={[styles.errorBox, { borderColor: '#ef4444' }]}>
-              <Text style={styles.errorText}>{error}</Text>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+        style={{ flex: 1 }}
+      >
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent} 
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.innerContainer}>
+            
+            <View style={styles.header}>
+              <View style={[styles.logoIcon, { backgroundColor: colors.primary }]}>
+                <Text style={styles.logoIconText}>PM</Text>
+              </View>
+              <Text style={[styles.logo, { color: colors.foreground }]}>O'PIED DU MONT</Text>
+              <Text style={[styles.subtitle, { color: colors.muted }]}>Gestion Restaurant & Bar</Text>
             </View>
-          )}
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.foreground }]}>Numéro de téléphone</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
-              placeholder="0708091011"
-              placeholderTextColor={colors.muted}
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={phone}
-              onChangeText={setPhone}
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.foreground }]}>Mot de passe</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
-              placeholder="••••••"
-              placeholderTextColor={colors.muted}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[styles.loginBtn, { backgroundColor: colors.primary, opacity: isLoading ? 0.6 : 1 }]}
-            onPress={handleLogin}
-            disabled={isLoading}
-            activeOpacity={0.8}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Text style={styles.loginBtnText}>Se connecter</Text>
+            {error && (
+              <View style={[styles.errorBox, { borderColor: '#ef4444' }]}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
             )}
-          </TouchableOpacity>
 
-          <View style={styles.footer}>
-            <Text style={{ color: colors.muted }}>Besoin d'aide ? </Text>
-            <TouchableOpacity onPress={() => Alert.alert("Assistance", "Contactez votre administrateur pour réinitialiser votre accès.")}>
-              <Text style={{ color: colors.primary, fontWeight: '900' }}>Cliquez ici</Text>
-            </TouchableOpacity>
-          </View>
+            <View style={styles.form}>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.foreground }]}>Téléphone</Text>
+                <TextInput
+                  style={[styles.input, { 
+                    borderColor: colors.border, 
+                    backgroundColor: colors.surface, 
+                    color: colors.foreground 
+                  }]}
+                  placeholder="Ex: 0701020304"
+                  placeholderTextColor={colors.muted}
+                  keyboardType="phone-pad"
+                  maxLength={10}
+                  value={phone}
+                  onChangeText={(val) => {
+                    setError(null);
+                    setPhone(val);
+                  }}
+                />
+              </View>
 
-          <View style={[styles.demoBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.demoTitle, { color: colors.muted }]}>SÉCURITÉ</Text>
-            <Text style={[styles.demoText, { color: colors.foreground }]}>
-              Cette application est réservée à l'usage interne du restaurant O'PIED DU MONT. 
-              Toute tentative d'accès non autorisé est journalisée.
-            </Text>
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.foreground }]}>Mot de passe</Text>
+                <TextInput
+                  style={[styles.input, { 
+                    borderColor: colors.border, 
+                    backgroundColor: colors.surface, 
+                    color: colors.foreground 
+                  }]}
+                  placeholder="Votre code secret"
+                  placeholderTextColor={colors.muted}
+                  secureTextEntry
+                  value={password}
+                  onChangeText={(val) => {
+                    setError(null);
+                    setPassword(val);
+                  }}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.loginBtn, { 
+                  backgroundColor: colors.primary, 
+                  opacity: isLoading ? 0.7 : 1 
+                }]}
+                onPress={handleLogin}
+                disabled={isLoading}
+                activeOpacity={0.8}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="white" />
+                ) : (
+                  <Text style={styles.loginBtnText}>Se connecter</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.footer}>
+              <Text style={{ color: colors.muted, fontWeight: '600' }}>Problème d'accès ? </Text>
+              <TouchableOpacity onPress={() => Alert.alert("Aide", "Contactez le gérant pour réinitialiser votre mot de passe.")}>
+                <Text style={{ color: colors.primary, fontWeight: '900' }}>Contacter le gérant</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.securityNotice, { backgroundColor: colors.surface + '80' }]}>
+              <Text style={[styles.securityText, { color: colors.muted }]}>
+                Accès sécurisé. L'utilisation frauduleuse de cette application fera l'objet de poursuites.
+              </Text>
+            </View>
+            
           </View>
-          
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -174,19 +210,21 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { flexGrow: 1 },
-  innerContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40 },
-  header: { alignItems: 'center', marginBottom: 45 },
-  logo: { fontSize: 34, fontWeight: '900', marginBottom: 8, letterSpacing: -1.5 },
-  subtitle: { fontSize: 13, textTransform: 'uppercase', letterSpacing: 1.5 },
-  errorBox: { backgroundColor: '#fee2e2', borderWidth: 1, padding: 14, borderRadius: 16, marginBottom: 25 },
+  innerContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 30, paddingVertical: 50 },
+  header: { alignItems: 'center', marginBottom: 50 },
+  logoIcon: { width: 60, height: 60, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
+  logoIconText: { color: 'white', fontSize: 24, fontWeight: '900' },
+  logo: { fontSize: 32, fontWeight: '900', letterSpacing: -1 },
+  subtitle: { fontSize: 14, fontWeight: '700', marginTop: 5, opacity: 0.6 },
+  form: { width: '100%' },
+  errorBox: { backgroundColor: '#fee2e2', borderWidth: 1, padding: 15, borderRadius: 18, marginBottom: 25 },
   errorText: { color: '#ef4444', textAlign: 'center', fontWeight: '800', fontSize: 13 },
-  inputGroup: { marginBottom: 22 },
-  label: { fontSize: 13, fontWeight: '800', marginBottom: 10, marginLeft: 4, textTransform: 'uppercase' },
-  input: { borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 15, fontSize: 16, fontWeight: '600' },
-  loginBtn: { borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 15, marginBottom: 25, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5 },
+  inputGroup: { marginBottom: 20 },
+  label: { fontSize: 13, fontWeight: '900', marginBottom: 8, marginLeft: 4, textTransform: 'uppercase' },
+  input: { borderWidth: 1.5, borderRadius: 18, paddingHorizontal: 20, paddingVertical: 16, fontSize: 16, fontWeight: '700' },
+  loginBtn: { borderRadius: 18, paddingVertical: 18, alignItems: 'center', marginTop: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 5 },
   loginBtnText: { color: 'white', fontSize: 17, fontWeight: '900' },
-  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  demoBox: { marginTop: 50, padding: 20, borderRadius: 20, borderWidth: 1 },
-  demoTitle: { fontSize: 11, fontWeight: '900', marginBottom: 8, textAlign: 'center', letterSpacing: 1 },
-  demoText: { fontSize: 12, textAlign: 'center', lineHeight: 18, opacity: 0.8 }
+  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 30 },
+  securityNotice: { marginTop: 60, padding: 15, borderRadius: 15, alignItems: 'center' },
+  securityText: { fontSize: 11, textAlign: 'center', lineHeight: 16, fontWeight: '600' }
 });

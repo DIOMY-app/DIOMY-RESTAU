@@ -1,30 +1,46 @@
 /**
  * RoleGuard - O'PIED DU MONT
- * Protège les composants selon le rôle de l'utilisateur
+ * Emplacement : /components/role-guard.tsx
+ * Version : Finale avec gestion de la casse des rôles
  */
 
 import React from 'react';
-import { View, Text } from 'react-native';
-// @ts-ignore
 import { useApp } from '../app-context';
 
+// Définition des types de rôles autorisés dans l'application
+export type AppRole = 'admin' | 'manager' | 'chef' | 'waiter' | 'cashier' | 'staff';
+
 interface RoleGuardProps {
-  allowedRoles: ('admin' | 'manager' | 'chef' | 'waiter' | 'cashier' | 'staff')[];
+  /** Liste des rôles autorisés à voir le contenu */
+  allowedRoles: AppRole[];
+  /** Le contenu à afficher si l'accès est autorisé */
   children: React.ReactNode;
+  /** Optionnel : Ce qui s'affiche si l'accès est refusé (ex: message "Accès restreint") */
   fallback?: React.ReactNode;
 }
 
+/**
+ * Composant de protection basé sur le rôle utilisateur.
+ * Utilisation : <RoleGuard allowedRoles={['admin', 'manager']}> <MonBouton /> </RoleGuard>
+ */
 export const RoleGuard = ({ allowedRoles, children, fallback }: RoleGuardProps) => {
   const { state } = useApp();
-  const userRole = state.user?.role;
+  
+  // Récupération du rôle et mise en minuscule pour la comparaison
+  const userRole = state.user?.role?.toLowerCase() as AppRole | undefined;
 
-  // Si le rôle de l'utilisateur est dans la liste autorisée
-  if (userRole && allowedRoles.includes(userRole)) {
+  // Vérification de l'autorisation
+  const isAuthorized = userRole && allowedRoles.map(r => r.toLowerCase()).includes(userRole);
+
+  if (isAuthorized) {
     return <>{children}</>;
   }
 
-  // Si l'utilisateur n'a pas accès
-  if (fallback) return <>{fallback}</>;
+  // Rendu en cas d'échec d'autorisation
+  if (fallback) {
+    return <>{fallback}</>;
+  }
 
-  return null; // Par défaut, on ne rend rien (cache le bouton/la section)
+  // Par défaut, on ne rend absolument rien (le composant est invisible)
+  return null;
 };

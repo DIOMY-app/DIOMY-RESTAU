@@ -2,13 +2,13 @@
  * Sign Up Screen - O'PIED DU MONT Mobile
  * Inscription via Numéro de Téléphone
  * Emplacement : /app/signup.tsx
- * Correction : TypeScript Errors (User Type & Navigation Href)
+ * Version : Corrigée avec PIN par défaut et validation 10 chiffres (CI)
  */
 
 import React, { useState } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, ScrollView, 
-  ActivityIndicator, StyleSheet, Alert 
+  ActivityIndicator, StyleSheet, Alert, KeyboardAvoidingView, Platform 
 } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -39,8 +39,9 @@ export default function SignUpScreen() {
   const handleSignUp = async () => {
     setError(null);
 
+    // Validations locales
     if (!isValidName(name)) {
-      setError('Veuillez entrer un nom valide');
+      setError('Veuillez entrer votre nom complet');
       return;
     }
 
@@ -65,6 +66,7 @@ export default function SignUpScreen() {
     try {
       const cleanPhone = phone.replace(/\s/g, '');
 
+      // 1. Vérifier si le numéro existe déjà
       const { data: existingUser } = await supabase
         .from('employes')
         .select('id')
@@ -72,9 +74,10 @@ export default function SignUpScreen() {
         .maybeSingle();
 
       if (existingUser) {
-        throw new Error('Ce numéro de téléphone est déjà utilisé.');
+        throw new Error('Ce numéro de téléphone est déjà associé à un compte.');
       }
 
+      // 2. Insertion avec PIN par défaut "1234"
       const { data, error: insertError } = await supabase
         .from('employes')
         .insert([
@@ -82,8 +85,9 @@ export default function SignUpScreen() {
             nom: name, 
             telephone: cleanPhone, 
             password: password, 
+            pin: "1234", 
             role: 'staff',
-            est_actif: true 
+            actif: true 
           }
         ])
         .select()
@@ -91,41 +95,50 @@ export default function SignUpScreen() {
 
       if (insertError) throw insertError;
 
-      // FIX ERREUR 1: On utilise les clés exactes de ton interface User (voir types.ts)
-      // J'utilise 'telephone' car c'est souvent ce qui est défini dans ton schéma SQL
+      // 3. Mise à jour du contexte global
       dispatch({
         type: 'SET_USER',
         payload: {
           id: data.id.toString(),
-          telephone: data.telephone, // Changé 'phone' par 'telephone' pour matcher ton Type User
-          nom: data.nom,             // Changé 'name' par 'nom' pour matcher ton Type User
+          telephone: data.telephone,
+          nom: data.nom,
           role: data.role,
           createdAt: data.created_at,
           updatedAt: new Date().toISOString(),
         },
       });
 
-      Alert.alert("Bienvenue !", "Votre compte a été créé avec succès.");
-      
-      // FIX ERREUR 2: Redirection vers la racine qui gère automatiquement les tabs
-      router.replace("/"); 
+      Alert.alert(
+        "Bienvenue ! ✨", 
+        "Votre compte a été créé avec succès.\n\nIMPORTANT : Votre code PIN par défaut est 1234. Changez-le rapidement dans vos paramètres.",
+        [{ text: "C'est parti !", onPress: () => router.replace("/") }]
+      );
       
     } catch (err: any) {
       setError(err.message || "Une erreur est survenue lors de l'inscription.");
-      console.error('Sign up error:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1, backgroundColor: colors.background }}
+    >
+      <ScrollView 
+        contentContainerStyle={{ flexGrow: 1 }} 
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.innerContainer}>
           
           <View style={styles.header}>
-            <Text style={[styles.title, { color: colors.primary }]}>Rejoindre l'équipe</Text>
-            <Text style={{ color: colors.muted, fontWeight: '800', letterSpacing: 1 }}>O'PIED DU MONT</Text>
+            <View style={[styles.logoCircle, { backgroundColor: colors.primary }]}>
+              <Text style={styles.logoText}>OM</Text>
+            </View>
+            <Text style={[styles.title, { color: colors.foreground }]}>Créer un compte</Text>
+            <Text style={{ color: colors.muted, fontWeight: '700', letterSpacing: 1 }}>O'PIED DU MONT</Text>
           </View>
 
           {error && (
@@ -134,90 +147,95 @@ export default function SignUpScreen() {
             </View>
           )}
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.foreground }]}>Nom complet</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
-              placeholder="Ex: Koffi Kouamé"
-              placeholderTextColor={colors.muted}
-              value={name}
-              onChangeText={setName}
-              autoCapitalize="words"
-            />
-          </View>
+          <View style={styles.form}>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.foreground }]}>Nom complet</Text>
+              <TextInput
+                style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
+                placeholder="Ex: Jean Kouassi"
+                placeholderTextColor={colors.muted}
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+              />
+            </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.foreground }]}>Numéro de téléphone</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
-              placeholder="0701020304"
-              placeholderTextColor={colors.muted}
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={phone}
-              onChangeText={setPhone}
-            />
-          </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.foreground }]}>Téléphone (10 chiffres)</Text>
+              <TextInput
+                style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
+                placeholder="0700000000"
+                placeholderTextColor={colors.muted}
+                keyboardType="phone-pad"
+                maxLength={10}
+                value={phone}
+                onChangeText={setPhone}
+              />
+            </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.foreground }]}>Mot de passe</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
-              placeholder="••••••"
-              placeholderTextColor={colors.muted}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
-          </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.foreground }]}>Mot de passe</Text>
+              <TextInput
+                style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
+                placeholder="••••••"
+                placeholderTextColor={colors.muted}
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+              />
+            </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={[styles.label, { color: colors.foreground }]}>Confirmer mot de passe</Text>
-            <TextInput
-              style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
-              placeholder="••••••"
-              placeholderTextColor={colors.muted}
-              secureTextEntry
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-            />
-          </View>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.foreground }]}>Confirmer</Text>
+              <TextInput
+                style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.foreground }]}
+                placeholder="••••••"
+                placeholderTextColor={colors.muted}
+                secureTextEntry
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+              />
+            </View>
 
-          <TouchableOpacity
-            style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: isLoading ? 0.6 : 1 }]}
-            onPress={handleSignUp}
-            disabled={isLoading}
-            activeOpacity={0.8}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="white" />
-            ) : (
-              <Text style={styles.submitBtnText}>Créer mon compte</Text>
-            )}
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: isLoading ? 0.7 : 1 }]}
+              onPress={handleSignUp}
+              disabled={isLoading}
+              activeOpacity={0.8}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.submitBtnText}>S'INSCRIRE MAINTENANT</Text>
+              )}
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.footer}>
-            <Text style={{ color: colors.muted }}>Déjà un compte ? </Text>
+            <Text style={{ color: colors.muted, fontWeight: '600' }}>Vous avez déjà un compte ? </Text>
             <TouchableOpacity onPress={() => router.back()}>
-              <Text style={{ color: colors.primary, fontWeight: '900' }}>Se connecter</Text>
+              <Text style={{ color: colors.primary, fontWeight: '900' }}>Connexion</Text>
             </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  innerContainer: { flex: 1, justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 60 },
-  header: { alignItems: 'center', marginBottom: 40 },
-  title: { fontSize: 32, fontWeight: '900', marginBottom: 4, letterSpacing: -1 },
-  errorBox: { backgroundColor: '#fee2e2', borderWidth: 1, padding: 14, borderRadius: 16, marginBottom: 20 },
+  innerContainer: { flex: 1, paddingHorizontal: 30, paddingVertical: 50, justifyContent: 'center' },
+  header: { alignItems: 'center', marginBottom: 35 },
+  logoCircle: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
+  logoText: { color: 'white', fontSize: 22, fontWeight: '900' },
+  title: { fontSize: 28, fontWeight: '900', marginBottom: 5, letterSpacing: -1 },
+  errorBox: { backgroundColor: '#fee2e2', borderWidth: 1, padding: 15, borderRadius: 15, marginBottom: 20 },
   errorText: { color: '#ef4444', textAlign: 'center', fontWeight: '800', fontSize: 13 },
-  inputGroup: { marginBottom: 20 },
-  label: { fontSize: 13, fontWeight: '800', marginBottom: 8, marginLeft: 4, textTransform: 'uppercase' },
-  input: { borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, fontWeight: '600' },
-  submitBtn: { borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 10, marginBottom: 30, elevation: 4 },
-  submitBtnText: { color: 'white', fontSize: 17, fontWeight: '900' },
-  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }
+  form: { width: '100%' },
+  inputGroup: { marginBottom: 18 },
+  label: { fontSize: 11, fontWeight: '900', marginBottom: 8, marginLeft: 5, textTransform: 'uppercase', letterSpacing: 0.5 },
+  input: { borderWidth: 2, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 15, fontSize: 16, fontWeight: '700' },
+  submitBtn: { borderRadius: 18, paddingVertical: 20, alignItems: 'center', marginTop: 10, marginBottom: 25, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5 },
+  submitBtnText: { color: 'white', fontSize: 15, fontWeight: '900', letterSpacing: 1 },
+  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 10 }
 });

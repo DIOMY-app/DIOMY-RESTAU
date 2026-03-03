@@ -2,11 +2,24 @@
  * useColors Hook - O'PIED DU MONT Mobile
  * Thème : "Earth" (Terre) - Inspiré par la nature et le contexte local de Korhogo
  * Emplacement : /hooks/use-colors.ts
+ * Version : 1.1 - Palette optimisée et Typage exporté
  */
 
 import { useColorScheme } from 'react-native';
 
-export const Colors = {
+export type ThemeColors = {
+  primary: string;
+  background: string;
+  surface: string;
+  foreground: string;
+  muted: string;
+  border: string;
+  success: string;
+  error: string;
+  warning: string;
+};
+
+export const Colors: { light: ThemeColors; dark: ThemeColors } = {
   light: {
     // Primaire : Ocre/Terre cuite (Rappel de la terre rouge et de l'artisanat local)
     primary: '#B3541E',    
@@ -26,7 +39,7 @@ export const Colors = {
     // Border : Argile claire
     border: '#E8E2D9',     
     
-    // Success : Vert Savane/Forêt (Adaptation spécifique au contexte )
+    // Success : Vert Savane/Forêt (Adaptation spécifique au contexte)
     success: '#3A5A40',    
     
     // Error : Rouge brique intense
@@ -39,7 +52,7 @@ export const Colors = {
     // Version sombre adaptée (Terre de Sienne profonde)
     primary: '#D9773E',
     
-    // Fond : Nuit de savane (Bleu-Noir très chaud)
+    // Fond : Nuit de savane (Brun-Noir très chaud)
     background: '#1A1614',
     
     // Surface : Roche volcanique
@@ -65,7 +78,10 @@ export const Colors = {
   },
 };
 
-export function useColors() {
+/**
+ * Hook personnalisé pour accéder aux couleurs du thème actuel
+ */
+export function useColors(): ThemeColors {
   const colorScheme = useColorScheme();
   
   // Utilise le thème système (light ou dark)

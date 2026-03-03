@@ -1,7 +1,7 @@
 /**
  * Types for O'PIED DU MONT Mobile App
  * Emplacement : racine (./types.ts)
- * Version finale : Harmonisée avec Reducer, Caisse et Supabase
+ * Version finale : Harmonisée avec Reducer, Caisse et Supabase (Français/Anglais)
  */
 
 export interface User {
@@ -16,8 +16,10 @@ export interface User {
 export interface MenuItem {
   id: string;
   name: string;
+  nom?: string; // Compatibilité Supabase
   description: string;
   price: number;
+  prix?: number; // Compatibilité Supabase
   category: string;
   image?: string;
   available: boolean;
@@ -28,6 +30,7 @@ export interface MenuItem {
 export interface Category {
   id: string;
   name: string;
+  nom?: string; // Compatibilité Supabase
   description?: string;
   icon?: string;
   createdAt: string;
@@ -36,9 +39,12 @@ export interface Category {
 
 export interface StockItem {
   id: string;
-  name: string;
+  name: string; 
+  nom?: string;      // Ajouté pour corriger l'erreur 2339
   quantity: number;
+  quantite?: number; // Compatibilité Supabase
   unit: string;
+  unite?: string;    // Compatibilité Supabase
   minQuantity: number;
   maxQuantity: number;
   lastUpdated: string;
@@ -52,7 +58,7 @@ export interface CartItem {
   name: string;
   price: number;
   quantity: number;   // Utilisé dans l'affichage UI
-  quantite?: number;  // Ajouté pour la compatibilité avec ton Reducer (UPDATE_CART_ITEM)
+  quantite?: number;  // Compatibilité avec UPDATE_CART_ITEM
   notes?: string;
 }
 
@@ -108,7 +114,6 @@ export interface AppContextType {
   employees: Employee[];
 }
 
-// Correction du nom pour correspondre à l'import dans data-service
 export interface AppAction {
   type: string;
   payload?: any;

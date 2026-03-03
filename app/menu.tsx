@@ -1,7 +1,7 @@
 /**
  * Menu Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/menu.tsx
- * Version : Gestion des accompagnements (Sauces/Grillades) et filtres PDF
+ * Version : Gestion des accompagnements (Sauces/Grillades) et filtres
  */
 
 import React, { useState } from 'react';
@@ -37,14 +37,17 @@ export default function MenuScreen() {
     return matchesSearch && matchesCategory;
   });
 
-  // Définition des accompagnements disponibles selon le type de plat
-  const ACCOMPAGNEMENTS_GRILLADES = ["Attiéké", "Aloco", "Frites de pomme de terre", "Salade"];
-  const ACCOMPAGNEMENTS_SAUCES = ["Riz Blanc"];
+  // Accompagnements spécifiques à la culture locale ivoirienne
+  const ACCOMPAGNEMENTS_GRILLADES = ["Attiéké", "Aloco", "Frites", "Salade", "Riz Gras"];
+  const ACCOMPAGNEMENTS_SAUCES = ["Riz Blanc", "Foutou Banane", "Placali", "Tô"];
 
   const handlePressItem = (item: MenuItem) => {
-    // Si c'est une sauce ou une grillade, on demande l'accompagnement
-    const isSauce = item.name.toLowerCase().includes('sauce');
-    const isGrillade = item.category === 'Grillades' || item.name.toLowerCase().includes('grillé') || item.name.toLowerCase().includes('pintade');
+    const itemNameLower = item.name.toLowerCase();
+    const itemCatLower = (item.category || '').toLowerCase();
+
+    // Logique de détection : Grillades ou Sauces
+    const isSauce = itemNameLower.includes('sauce') || itemCatLower.includes('sauce');
+    const isGrillade = itemCatLower.includes('grillade') || itemNameLower.includes('grillé') || itemNameLower.includes('pintade') || itemNameLower.includes('poulet');
 
     if (isSauce || isGrillade) {
       setPendingItem(item);
@@ -60,16 +63,20 @@ export default function MenuScreen() {
     dispatch({
       type: 'ADD_TO_CART',
       payload: {
-        id: Math.random().toString(36).substring(2, 11),
+        // Utilisation d'un ID unique basé sur le temps pour le panier
+        id: `${item.id}-${Date.now()}`, 
         menuItemId: item.id,
         name: finalName,
         price: item.price,
         quantity: 1,
-        quantite: 1
+        quantite: 1 // Double mapping pour compatibilité avec certains services
       }
     });
 
-    if (showAccompModal) setShowAccompModal(false);
+    if (showAccompModal) {
+      setShowAccompModal(false);
+      setPendingItem(null);
+    }
   };
 
   return (
@@ -124,11 +131,11 @@ export default function MenuScreen() {
                 <View style={styles.flex1}>
                   <Text style={[styles.itemName, { color: colors.foreground }]}>{item.name}</Text>
                   <Text style={[styles.itemDesc, { color: colors.muted }]} numberOfLines={2}>
-                    {item.description}
+                    {item.description || "Aucune description disponible"}
                   </Text>
                 </View>
                 <Text style={[styles.itemPrice, { color: colors.primary }]}>
-                  {item.price === 0 ? "Prix à fixer" : formatPrice(item.price)}
+                  {item.price === 0 ? "—" : formatPrice(item.price)}
                 </Text>
               </View>
               
@@ -138,28 +145,33 @@ export default function MenuScreen() {
                 disabled={!item.available}
               >
                 <Text style={styles.addBtnText}>
-                  {item.available ? "Ajouter à la commande" : "Indisponible"}
+                  {item.available ? "Ajouter à la commande" : "Épuisé"}
                 </Text>
               </TouchableOpacity>
             </View>
           ))
         ) : (
-          <View style={styles.center}><Text style={{color: colors.muted}}>Aucun plat trouvé.</Text></View>
+          <View style={styles.center}>
+            <Text style={{color: colors.muted, fontWeight: '600'}}>Aucun résultat pour cette recherche.</Text>
+          </View>
         )}
       </ScrollView>
 
       {/* MODAL DE SÉLECTION D'ACCOMPAGNEMENT */}
-      <Modal visible={showAccompModal} transparent animationType="slide">
+      <Modal visible={showAccompModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Choisissez l'accompagnement</Text>
-            <Text style={{ color: colors.muted, marginBottom: 20 }}>Pour : {pendingItem?.name}</Text>
+            <View style={styles.modalIndicator} />
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Accompagnement</Text>
+            <Text style={{ color: colors.muted, marginBottom: 25, fontSize: 16 }}>
+              Quel accompagnement pour votre <Text style={{fontWeight:'bold', color: colors.primary}}>{pendingItem?.name}</Text> ?
+            </Text>
             
             <View style={styles.accompGrid}>
               {(pendingItem?.name.toLowerCase().includes('sauce') ? ACCOMPAGNEMENTS_SAUCES : ACCOMPAGNEMENTS_GRILLADES).map((acc) => (
                 <TouchableOpacity 
                   key={acc} 
-                  style={[styles.accompOption, { borderColor: colors.border }]}
+                  style={[styles.accompOption, { borderColor: colors.border, backgroundColor: colors.background }]}
                   onPress={() => pendingItem && addToCart(pendingItem, acc)}
                 >
                   <Text style={[styles.accompText, { color: colors.foreground }]}>{acc}</Text>
@@ -168,10 +180,10 @@ export default function MenuScreen() {
             </View>
 
             <TouchableOpacity 
-              style={[styles.closeBtn, { backgroundColor: colors.border }]} 
-              onPress={() => setShowAccompModal(false)}
+              style={[styles.closeBtn, { backgroundColor: colors.border + '50' }]} 
+              onPress={() => { setShowAccompModal(false); setPendingItem(null); }}
             >
-              <Text style={{ color: colors.foreground, fontWeight: '700' }}>Annuler</Text>
+              <Text style={{ color: '#ef4444', fontWeight: '800', fontSize: 16 }}>Annuler</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -183,26 +195,26 @@ export default function MenuScreen() {
 const styles = StyleSheet.create({
   header: { padding: 20, paddingBottom: 10 },
   title: { fontSize: 32, fontWeight: '900', marginBottom: 15, letterSpacing: -1 },
-  searchInput: { borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 12, fontSize: 16 },
+  searchInput: { borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 12, fontSize: 16, fontWeight: '600' },
   categoryContainer: { paddingLeft: 20, marginBottom: 10, marginTop: 5 },
   categoryBadge: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 25, borderWidth: 1.5, marginRight: 10 },
-  categoryText: { fontWeight: '800', fontSize: 13, textTransform: 'uppercase' },
-  listContent: { padding: 20, gap: 16, paddingBottom: 100 },
-  itemCard: { padding: 18, borderRadius: 20, borderWidth: 1, elevation: 3 },
+  categoryText: { fontWeight: '800', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  listContent: { padding: 20, gap: 16, paddingBottom: 120 },
+  itemCard: { padding: 18, borderRadius: 24, borderWidth: 1, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
   itemInfo: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 18 },
   flex1: { flex: 1, paddingRight: 15 },
-  itemName: { fontSize: 19, fontWeight: '800' },
-  itemDesc: { fontSize: 14, marginTop: 5, lineHeight: 20 },
-  itemPrice: { fontSize: 17, fontWeight: '900' },
-  addBtn: { paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  addBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', marginTop: 60 },
-  // Styles Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 30, minHeight: 400 },
-  modalTitle: { fontSize: 22, fontWeight: '900', marginBottom: 5 },
-  accompGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 30 },
-  accompOption: { padding: 15, borderRadius: 15, borderWidth: 1.5, minWidth: '45%', alignItems: 'center' },
-  accompText: { fontWeight: '700', fontSize: 16 },
-  closeBtn: { padding: 18, borderRadius: 15, alignItems: 'center' }
+  itemName: { fontSize: 19, fontWeight: '800', letterSpacing: -0.3 },
+  itemDesc: { fontSize: 13, marginTop: 4, lineHeight: 18, opacity: 0.8 },
+  itemPrice: { fontSize: 18, fontWeight: '900' },
+  addBtn: { paddingVertical: 15, borderRadius: 16, alignItems: 'center' },
+  addBtnText: { color: '#fff', fontWeight: '900', fontSize: 15, textTransform: 'uppercase' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', marginTop: 100 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalContent: { borderTopLeftRadius: 35, borderTopRightRadius: 35, padding: 25, paddingBottom: 40, minHeight: 450 },
+  modalIndicator: { width: 40, height: 5, backgroundColor: '#ccc', borderRadius: 10, alignSelf: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 24, fontWeight: '900', marginBottom: 5 },
+  accompGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 35 },
+  accompOption: { padding: 18, borderRadius: 18, borderWidth: 1.5, width: '47%', alignItems: 'center', justifyContent: 'center' },
+  accompText: { fontWeight: '800', fontSize: 15 },
+  closeBtn: { padding: 18, borderRadius: 18, alignItems: 'center' }
 });

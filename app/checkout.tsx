@@ -1,7 +1,7 @@
 /**
  * Checkout Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/checkout.tsx
- * Version : Enregistrement client + Reçu WhatsApp + Sync Totaux
+ * Version : 1.3 - Correction stricte des types CartItem (Sync English properties)
  */
 
 import React, { useState } from 'react';
@@ -26,55 +26,73 @@ export default function CheckoutScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Synchronisation des calculs avec la logique globale
-  const subtotal = state.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const serviceCharge = subtotal * 0.05; // On garde le même taux que dans orders.tsx
+  // Correction des propriétés pour correspondre au type CartItem (name, price, quantity)
+  const subtotal = state.cart.reduce((sum, item) => {
+    const p = item.price || 0;
+    const q = item.quantity || 0;
+    return sum + (p * q);
+  }, 0);
+
+  const serviceCharge = subtotal * 0.05; 
   const total = subtotal + serviceCharge;
 
   const validateOrder = async () => {
-    // Règle n°1 : Validation des entrées
     if (!customerName || !phoneNumber) {
-      Alert.alert("Champs manquants", "Veuillez remplir le nom et le numéro WhatsApp du client.");
+      Alert.alert("Champs manquants", "Veuillez remplir le nom et le numéro WhatsApp.");
       return;
     }
 
-    if (phoneNumber.length !== 10) {
-      Alert.alert("Numéro invalide", "Le numéro doit comporter 10 chiffres (Côte d'Ivoire).");
+    const cleanPhone = phoneNumber.replace(/\s/g, '');
+    if (cleanPhone.length < 8) {
+      Alert.alert("Numéro invalide", "Veuillez entrer un numéro de téléphone valide.");
       return;
     }
 
     setIsProcessing(true);
 
     try {
-      // 1. Enregistrement/Mise à jour du client
+      // 1. Mise à jour automatique de la 'derniere_visite' du client
       const { data: customer, error: custError } = await supabase
         .from('clients')
         .upsert({ 
           nom: customerName, 
-          telephone: phoneNumber,
-          derniere_visite: new Date().toISOString()
+          telephone: cleanPhone,
+          derniere_visite: new Date().toISOString(),
+          actif: true
         }, { onConflict: 'telephone' })
         .select()
         .single();
 
       if (custError) throw custError;
 
-      // 2. Enregistrement de la commande en base
-      const { error: orderError } = await supabase
-        .from('commandes')
+      // 2. Préparation des items avec les propriétés détectées dans ton interface
+      const itemsForSql = state.cart.map(item => ({
+        nom: item.name || 'Produit sans nom',
+        quantite: item.quantity || 1,
+        prix_unitaire: item.price || 0
+      }));
+
+      // 3. Enregistrement Transaction
+      const { data: transaction, error: transError } = await supabase
+        .from('transactions')
         .insert({
           client_id: customer.id,
-          total: total,
-          articles: state.cart, 
-          statut: 'complete',
-          service_charge: serviceCharge // On stocke les frais séparément pour la compta
-        });
+          client_contact: cleanPhone,
+          montant_total: total,
+          sous_total: subtotal,
+          items: itemsForSql,
+          mode_paiement: 'especes',
+          caissier: state.user?.nom || 'Vente Directe',
+          creee_a: new Date().toISOString()
+        })
+        .select()
+        .single();
 
-      if (orderError) throw orderError;
+      if (transError) throw transError;
 
-      // 3. Construction du message WhatsApp élégant
+      // 4. Reçu WhatsApp
       const itemsList = state.cart
-        .map((item) => `• ${item.quantity}x ${item.name} : ${formatPrice(item.price * item.quantity)}`)
+        .map((item) => `• ${item.quantity}x ${item.name} : ${formatPrice((item.price || 0) * (item.quantity || 0))}`)
         .join('\n');
 
       const message = 
@@ -89,29 +107,26 @@ export default function CheckoutScreen() {
         `*TOTAL : ${formatPrice(total)}*\n\n` +
         `_Au plaisir de vous revoir bientôt ! ✨_`;
 
-      const encodedMsg = encodeURIComponent(message);
-      const whatsappUrl = `whatsapp://send?phone=225${phoneNumber}&text=${encodedMsg}`;
+      const whatsappUrl = `whatsapp://send?phone=225${cleanPhone}&text=${encodeURIComponent(message)}`;
 
-      // 4. Dialogue de fin
       Alert.alert(
-        "Vente terminée",
-        "Le client et la commande ont été enregistrés.",
+        "Vente enregistrée ✅",
+        `Transaction #${transaction.id.toString().slice(-4)} réussie.`,
         [
           { 
-            text: "Ignorer le reçu", 
+            text: "Terminer", 
             onPress: () => {
               dispatch({ type: 'CLEAR_CART' });
               router.replace('/'); 
             }
           },
           { 
-            text: "Envoyer WhatsApp", 
+            text: "Envoyer le Reçu", 
+            style: "default",
             onPress: async () => {
               const supported = await Linking.canOpenURL(whatsappUrl);
               if (supported) {
                 await Linking.openURL(whatsappUrl);
-              } else {
-                Alert.alert("Erreur", "L'application WhatsApp n'est pas installée sur ce téléphone.");
               }
               dispatch({ type: 'CLEAR_CART' });
               router.replace('/');
@@ -121,8 +136,8 @@ export default function CheckoutScreen() {
       );
 
     } catch (error: any) {
-      console.error(error);
-      Alert.alert("Erreur technique", "Une erreur est survenue lors de l'enregistrement : " + error.message);
+      console.error("Erreur Checkout:", error.message);
+      Alert.alert("Erreur", error.message);
     } finally {
       setIsProcessing(false);
     }
@@ -132,26 +147,26 @@ export default function CheckoutScreen() {
     <ScreenContainer>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.foreground }]}>Finalisation</Text>
-          <Text style={{ color: colors.muted }}>Enregistrement du reçu client</Text>
+          <Text style={[styles.title, { color: colors.foreground }]}>Paiement</Text>
+          <Text style={{ color: colors.muted }}>Client : {customerName || '...'}</Text>
         </View>
         
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.label, { color: colors.muted }]}>NOM DU CLIENT</Text>
           <TextInput
             style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background }]}
-            placeholder="Ex: M. Jean"
+            placeholder="Ex: M. Diomande"
             placeholderTextColor={colors.muted}
             value={customerName}
             onChangeText={setCustomerName}
           />
 
-          <Text style={[styles.label, { color: colors.muted, marginTop: 20 }]}>MOBILE (WHATSAPP)</Text>
+          <Text style={[styles.label, { color: colors.muted, marginTop: 20 }]}>WHATSAPP (SANS +225)</Text>
           <View style={[styles.phoneWrapper, { borderColor: colors.border, backgroundColor: colors.background }]}>
             <Text style={[styles.prefix, { color: colors.muted }]}>+225 </Text>
             <TextInput
               style={[styles.phoneInput, { color: colors.foreground }]}
-              placeholder="01 02 03 04 05"
+              placeholder="0701020304"
               placeholderTextColor={colors.muted}
               keyboardType="phone-pad"
               maxLength={10}
@@ -167,11 +182,11 @@ export default function CheckoutScreen() {
             <Text style={{ color: colors.foreground }}>{formatPrice(subtotal)}</Text>
           </View>
           <View style={styles.summaryLine}>
-            <Text style={{ color: colors.muted }}>Service :</Text>
+            <Text style={{ color: colors.muted }}>Service (5%) :</Text>
             <Text style={{ color: colors.foreground }}>{formatPrice(serviceCharge)}</Text>
           </View>
-          <View style={[styles.summaryLine, styles.totalLine]}>
-            <Text style={[styles.totalLabel, { color: colors.foreground }]}>Total net</Text>
+          <View style={[styles.summaryLine, styles.totalLine, { borderTopColor: colors.border }]}>
+            <Text style={[styles.totalLabel, { color: colors.foreground }]}>Total Net</Text>
             <Text style={[styles.totalAmount, { color: colors.primary }]}>{formatPrice(total)}</Text>
           </View>
         </View>
@@ -189,7 +204,7 @@ export default function CheckoutScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={{ color: colors.muted, fontWeight: '600' }}>Modifier la commande</Text>
+          <Text style={{ color: colors.muted, fontWeight: '600' }}>Modifier le panier</Text>
         </TouchableOpacity>
       </ScrollView>
     </ScreenContainer>
@@ -208,10 +223,10 @@ const styles = StyleSheet.create({
   phoneInput: { flex: 1, height: 55, fontSize: 18, fontWeight: '700' },
   summaryContainer: { marginBottom: 40, paddingHorizontal: 5 },
   summaryLine: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  totalLine: { marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#eee' },
+  totalLine: { marginTop: 15, paddingTop: 15, borderTopWidth: 1 },
   totalLabel: { fontSize: 20, fontWeight: '900' },
   totalAmount: { fontSize: 28, fontWeight: '900' },
-  submitBtn: { height: 65, borderRadius: 20, alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5 },
+  submitBtn: { height: 65, borderRadius: 20, alignItems: 'center', justifyContent: 'center', elevation: 8 },
   submitBtnText: { color: '#fff', fontSize: 17, fontWeight: '900', letterSpacing: 1 },
   backBtn: { marginTop: 25, alignItems: 'center', padding: 10 }
 });

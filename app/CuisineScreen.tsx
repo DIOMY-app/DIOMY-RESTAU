@@ -1,7 +1,7 @@
 /**
  * CuisineScreen - O'PIED DU MONT Mobile
  * Emplacement : /app/CuisineScreen.tsx
- * Version Finale : Production + Gestion des Recettes Admin
+ * Version : 3.2 - Realtime Optimisé + Sync Badges Accueil
  */
 
 import React, { useState, useEffect } from 'react';
@@ -21,25 +21,55 @@ interface Preparation {
   creee_a: string;
 }
 
+interface RecipeIngredient {
+  stock_id: number;
+  stock_name: string;
+  quantity: number;
+}
+
 export default function CuisineScreen() {
   const colors = useColors();
   const { state } = useApp();
+  
   const [preparations, setPreparations] = useState<Preparation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'bons' | 'recettes'>('bons');
 
-  // État pour la création de recette (Admin)
+  // États pour la création de recette
   const [isRecipeModalVisible, setIsRecipeModalVisible] = useState(false);
+  const [selectedMenuId, setSelectedMenuId] = useState('');
+  const [selectedStockId, setSelectedStockId] = useState('');
+  const [qtyToConsume, setQtyToConsume] = useState('');
+  const [tempIngredients, setTempIngredients] = useState<RecipeIngredient[]>([]);
+
   const isAdmin = state?.user?.role?.toLowerCase() === 'admin';
+  const availableStock = state.stockItems || []; 
 
   useEffect(() => {
     fetchPreparations();
 
+    // Optimisation Realtime : On écoute les changements
     const channel = supabase
       .channel('cuisine_realtime')
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'preparation_cuisine' }, 
-        () => fetchPreparations()
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setPreparations(prev => [...prev, payload.new as Preparation].sort((a, b) => 
+              new Date(a.creee_a).getTime() - new Date(b.creee_a).getTime()
+            ));
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = payload.new as Preparation;
+            if (updated.statut === 'pret') {
+              setPreparations(prev => prev.filter(p => p.id !== updated.id));
+            } else {
+              setPreparations(prev => prev.map(p => p.id === updated.id ? updated : p));
+            }
+          } else {
+            fetchPreparations();
+          }
+        }
       )
       .subscribe();
 
@@ -53,7 +83,7 @@ export default function CuisineScreen() {
       const { data, error } = await supabase
         .from('preparation_cuisine')
         .select('*')
-        .neq('statut', 'pret')
+        .neq('statut', 'pret') 
         .order('creee_a', { ascending: true });
 
       if (error) throw error;
@@ -65,9 +95,50 @@ export default function CuisineScreen() {
     }
   };
 
+  /**
+   * LOGIQUE DE DÉDUCTION DE STOCK
+   */
+  const deductStockFromItems = async (items: any[]) => {
+    try {
+      for (const item of items) {
+        const menuItemId = item.id || item.menu_item_id;
+        const quantitySold = item.quantite || item.quantity || 1;
+
+        const { data: recipeLines, error: recipeError } = await supabase
+          .from('recipes')
+          .select('stock_id, quantite_consommee')
+          .eq('menu_item_id', menuItemId);
+
+        if (recipeError) throw recipeError;
+
+        if (recipeLines && recipeLines.length > 0) {
+          for (const line of recipeLines) {
+            const totalToDeduct = line.quantite_consommee * quantitySold;
+            
+            // Correction : Utilisation d'une transaction via RPC si possible, 
+            // sinon on récupère la valeur la plus fraîche
+            const { data: currentStock } = await supabase
+              .from('stock')
+              .select('quantite')
+              .eq('id', line.stock_id)
+              .single();
+
+            if (currentStock) {
+              await supabase
+                .from('stock')
+                .update({ quantite: currentStock.quantite - totalToDeduct })
+                .eq('id', line.stock_id);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Erreur déduction stock:", err);
+    }
+  };
+
   const updateStatus = async (prep: Preparation) => {
-    let nextStatus: 'en_cours' | 'pret' = 'en_cours';
-    if (prep.statut === 'en_cours') nextStatus = 'pret';
+    let nextStatus: 'en_cours' | 'pret' = prep.statut === 'en_attente' ? 'en_cours' : 'pret';
 
     try {
       const { error } = await supabase
@@ -76,8 +147,65 @@ export default function CuisineScreen() {
         .eq('id', prep.id);
 
       if (error) throw error;
+
+      if (nextStatus === 'pret') {
+        const itemsList = Array.isArray(prep.items) ? prep.items : [];
+        await deductStockFromItems(itemsList);
+      }
+
     } catch (err: any) {
-      Alert.alert("Erreur", "Impossible de mettre à jour la commande.");
+      Alert.alert("Erreur", "Action impossible : " + err.message);
+    }
+  };
+
+  // --- LOGIQUE DES RECETTES ---
+  const addIngredientToTempList = () => {
+    if (!selectedStockId || !qtyToConsume) {
+      Alert.alert("Incomplet", "Entrez l'ID ingrédient et la quantité.");
+      return;
+    }
+
+    const stockItem = availableStock.find((s: any) => s.id.toString() === selectedStockId);
+    const displayName = stockItem ? (stockItem.nom || stockItem.name) : `ID #${selectedStockId}`;
+
+    const newIngredient: RecipeIngredient = {
+      stock_id: parseInt(selectedStockId),
+      stock_name: displayName,
+      quantity: parseFloat(qtyToConsume.replace(',', '.'))
+    };
+
+    setTempIngredients([...tempIngredients, newIngredient]);
+    setSelectedStockId('');
+    setQtyToConsume('');
+  };
+
+  const handleSaveRecipe = async () => {
+    if (!selectedMenuId || tempIngredients.length === 0) {
+      Alert.alert("Erreur", "Sélectionnez un plat et ses ingrédients.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const recipeData = tempIngredients.map(ing => ({
+        menu_item_id: parseInt(selectedMenuId),
+        stock_id: ing.stock_id,
+        quantite_consommee: ing.quantity
+      }));
+
+      await supabase.from('recipes').delete().eq('menu_item_id', parseInt(selectedMenuId));
+      const { error } = await supabase.from('recipes').insert(recipeData);
+
+      if (error) throw error;
+
+      Alert.alert("Succès ✨", "Fiche technique mise à jour.");
+      setIsRecipeModalVisible(false);
+      setTempIngredients([]);
+      setSelectedMenuId('');
+    } catch (err: any) {
+      Alert.alert("Erreur SQL", err.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -92,13 +220,12 @@ export default function CuisineScreen() {
             <Text style={[styles.tableText, { color: colors.foreground }]}>
               {item.table_numero ? `TABLE ${item.table_numero}` : '🛍️ À EMPORTER'}
             </Text>
-            <Text style={styles.timeText}>
+            <Text style={[styles.timeText, { color: colors.muted }]}>
               🕒 Reçu à {new Date(item.creee_a).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
             </Text>
           </View>
-          
-          <View style={[styles.statusBadge, { backgroundColor: isEnAttente ? colors.error + '20' : '#fef9c3' }]}>
-            <Text style={{ fontSize: 11, fontWeight: 'bold', color: isEnAttente ? colors.error : '#a16207' }}>
+          <View style={[styles.statusBadge, { backgroundColor: isEnAttente ? '#fee2e2' : '#fef9c3' }]}>
+            <Text style={{ fontSize: 10, fontWeight: '900', color: isEnAttente ? '#b91c1c' : '#a16207' }}>
               {item.statut.toUpperCase().replace('_', ' ')}
             </Text>
           </View>
@@ -122,7 +249,7 @@ export default function CuisineScreen() {
           onPress={() => updateStatus(item)}
         >
           <Text style={styles.actionBtnText}>
-            {isEnAttente ? 'LANCER LA PRÉPARATION' : 'MARQUER COMME PRÊT'}
+            {isEnAttente ? 'LANCER LA PRÉPARATION' : 'PRÊT POUR SERVICE ✅'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -131,23 +258,15 @@ export default function CuisineScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* HEADER AVEC ONGLETS */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.title, { color: colors.foreground }]}>CUISINE & RECETTES</Text>
-        
+        <Text style={[styles.title, { color: colors.foreground }]}>INTERFACE CUISINE</Text>
         <View style={styles.tabsContainer}>
-          <TouchableOpacity 
-            onPress={() => setActiveTab('bons')}
-            style={[styles.tab, activeTab === 'bons' && { borderBottomColor: colors.primary, borderBottomWidth: 3 }]}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'bons' ? colors.primary : colors.muted }]}>BONS EN COURS</Text>
+          <TouchableOpacity onPress={() => setActiveTab('bons')} style={[styles.tab, activeTab === 'bons' && { borderBottomColor: colors.primary, borderBottomWidth: 3 }]}>
+            <Text style={[styles.tabText, { color: activeTab === 'bons' ? colors.primary : colors.muted }]}>COMMANDES</Text>
           </TouchableOpacity>
           {isAdmin && (
-            <TouchableOpacity 
-              onPress={() => setActiveTab('recettes')}
-              style={[styles.tab, activeTab === 'recettes' && { borderBottomColor: colors.primary, borderBottomWidth: 3 }]}
-            >
-              <Text style={[styles.tabText, { color: activeTab === 'recettes' ? colors.primary : colors.muted }]}>RECETTES (ADMIN)</Text>
+            <TouchableOpacity onPress={() => setActiveTab('recettes')} style={[styles.tab, activeTab === 'recettes' && { borderBottomColor: colors.primary, borderBottomWidth: 3 }]}>
+              <Text style={[styles.tabText, { color: activeTab === 'recettes' ? colors.primary : colors.muted }]}>FICHES TECHNIQUES</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -164,8 +283,7 @@ export default function CuisineScreen() {
             contentContainerStyle={styles.listContent}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
-                <Text style={[styles.emptyText, { color: colors.foreground }]}>Cuisine à jour ! ✨</Text>
-                <Text style={{ color: colors.muted, textAlign: 'center' }}>Aucun bon en attente.</Text>
+                <Text style={[styles.emptyText, { color: colors.muted }]}>Aucun bon en attente. Repos ! 🌴</Text>
               </View>
             }
           />
@@ -173,61 +291,79 @@ export default function CuisineScreen() {
       ) : (
         <ScrollView contentContainerStyle={styles.recipeContainer}>
           <View style={[styles.infoBox, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.infoTitle, { color: colors.foreground }]}>Liaison Stock Automatique</Text>
-            <Text style={{ color: colors.muted, marginBottom: 15 }}>
-              Configurez ici quels ingrédients sont consommés pour chaque plat vendu.
+            <Text style={[styles.infoTitle, { color: colors.foreground }]}>Automatisation Stocks</Text>
+            <Text style={{ color: colors.muted, marginBottom: 20, fontSize: 13 }}>
+              En configurant une recette, le stock sera déduit dès qu'un plat est marqué comme "Prêt".
             </Text>
-            <TouchableOpacity 
-              style={[styles.addRecipeBtn, { backgroundColor: colors.primary }]}
-              onPress={() => setIsRecipeModalVisible(true)}
-            >
-              <Text style={styles.addRecipeBtnText}>+ CRÉER UNE RECETTE</Text>
+            <TouchableOpacity style={[styles.addRecipeBtn, { backgroundColor: colors.primary }]} onPress={() => setIsRecipeModalVisible(true)}>
+              <Text style={styles.addRecipeBtnText}>+ CONFIGURER UNE RECETTE</Text>
             </TouchableOpacity>
           </View>
-          
-          {/* Liste fictive des recettes existantes (à lier à ta table recipes) */}
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Recettes Actives</Text>
-          <Text style={{ color: colors.muted, fontSize: 12, fontStyle: 'italic' }}>
-            Aucune recette configurée. Les ventes déduisent actuellement les produits finis uniquement.
-          </Text>
         </ScrollView>
       )}
 
-      {/* MODAL CONFIGURATION RECETTE */}
-      <Modal visible={isRecipeModalVisible} transparent animationType="slide">
+      {/* Modal Recette identique */}
+      <Modal visible={isRecipeModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Nouvelle Recette</Text>
-            
-            <Text style={styles.label}>Plat du Menu</Text>
-            <TextInput 
-              style={[styles.input, { color: colors.foreground, borderColor: colors.border }]} 
-              placeholder="Ex: Poulet Braisé"
-              placeholderTextColor={colors.muted}
-            />
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={[styles.modalTitle, { color: colors.foreground }]}>Nouvelle Recette</Text>
+              
+              <Text style={styles.label}>ID du Plat au Menu</Text>
+              <TextInput 
+                style={[styles.input, { borderColor: colors.border, color: colors.foreground }]}
+                placeholder="Ex: 101"
+                value={selectedMenuId}
+                onChangeText={setSelectedMenuId}
+                keyboardType="numeric"
+              />
 
-            <Text style={styles.label}>Ingrédient du Stock</Text>
-            <TextInput 
-              style={[styles.input, { color: colors.foreground, borderColor: colors.border }]} 
-              placeholder="Ex: Poulet Entier"
-              placeholderTextColor={colors.muted}
-            />
+              <Text style={styles.label}>Ajouter des ingrédients</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TextInput 
+                  style={[styles.input, { flex: 2, borderColor: colors.border, color: colors.foreground }]} 
+                  placeholder="ID Stock"
+                  value={selectedStockId}
+                  onChangeText={setSelectedStockId}
+                  keyboardType="numeric"
+                />
+                <TextInput 
+                  style={[styles.input, { flex: 1, borderColor: colors.border, color: colors.foreground }]} 
+                  placeholder="Qté"
+                  value={qtyToConsume}
+                  onChangeText={setQtyToConsume}
+                  keyboardType="numeric"
+                />
+                <TouchableOpacity onPress={addIngredientToTempList} style={[styles.plusBtn, { backgroundColor: colors.primary }]}>
+                  <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 20 }}>+</Text>
+                </TouchableOpacity>
+              </View>
 
-            <Text style={styles.label}>Quantité consommée</Text>
-            <TextInput 
-              style={[styles.input, { color: colors.foreground, borderColor: colors.border }]} 
-              placeholder="Ex: 1"
-              keyboardType="numeric"
-            />
+              <View style={styles.tempList}>
+                {tempIngredients.map((item, index) => (
+                  <View key={index} style={[styles.tempItem, { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 }]}>
+                    <Text style={{ flex: 1, color: colors.foreground, fontWeight: '600' }}>{item.stock_name}</Text>
+                    <Text style={{ color: colors.primary, fontWeight: '800', marginRight: 15 }}>{item.quantity}</Text>
+                    <TouchableOpacity onPress={() => setTempIngredients(tempIngredients.filter((_, i) => i !== index))}>
+                      <Text style={{ color: '#ef4444' }}>✖</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setIsRecipeModalVisible(false)} style={styles.cancelBtn}>
-                <Text style={{ color: colors.muted, fontWeight: '700' }}>ANNULER</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]}>
-                <Text style={{ color: 'white', fontWeight: '900' }}>ENREGISTRER</Text>
-              </TouchableOpacity>
-            </View>
+              <View style={styles.modalActions}>
+                <TouchableOpacity onPress={() => setIsRecipeModalVisible(false)} style={styles.cancelBtn}>
+                  <Text style={{ color: colors.muted }}>FERMER</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  disabled={isSubmitting || tempIngredients.length === 0}
+                  onPress={handleSaveRecipe}
+                  style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: tempIngredients.length === 0 ? 0.5 : 1 }]}
+                >
+                  <Text style={{ color: 'white', fontWeight: '900' }}>VALIDER LA FICHE</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -238,38 +374,40 @@ export default function CuisineScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { paddingHorizontal: 20, paddingTop: 20, borderBottomWidth: 1 },
-  title: { fontSize: 22, fontWeight: '900', textAlign: 'center', marginBottom: 15 },
+  header: { paddingHorizontal: 20, paddingTop: 10, borderBottomWidth: 1 },
+  title: { fontSize: 18, fontWeight: '900', textAlign: 'center', marginBottom: 15, letterSpacing: 1 },
   tabsContainer: { flexDirection: 'row', justifyContent: 'center', gap: 30 },
-  tab: { paddingVertical: 10 },
-  tabText: { fontWeight: '800', fontSize: 13 },
-  listContent: { padding: 16, gap: 20 },
-  card: { borderRadius: 24, borderWidth: 1.5, padding: 20, elevation: 4 },
+  tab: { paddingVertical: 12 },
+  tabText: { fontWeight: '900', fontSize: 11, letterSpacing: 0.5 },
+  listContent: { padding: 16 },
+  card: { borderRadius: 24, borderWidth: 1.5, padding: 20, marginBottom: 15, elevation: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
-  tableText: { fontSize: 24, fontWeight: '900' },
-  timeText: { fontSize: 13, color: '#94a3b8', marginTop: 4 },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  tableText: { fontSize: 22, fontWeight: '900' },
+  timeText: { fontSize: 12, marginTop: 4 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, alignSelf: 'flex-start' },
   itemsList: { marginBottom: 20, borderTopWidth: 1, paddingTop: 15 },
-  itemRowContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  qtyCircle: { width: 36, height: 36, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  qtyText: { color: 'white', fontWeight: '900', fontSize: 16 },
-  itemName: { fontSize: 18, fontWeight: '700' },
-  actionBtn: { paddingVertical: 18, borderRadius: 16, alignItems: 'center' },
-  actionBtnText: { color: 'white', fontWeight: '900', fontSize: 16 },
+  itemRowContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  qtyCircle: { width: 34, height: 34, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  qtyText: { color: 'white', fontWeight: '900', fontSize: 15 },
+  itemName: { fontSize: 17, fontWeight: '700' },
+  actionBtn: { paddingVertical: 18, borderRadius: 15, alignItems: 'center' },
+  actionBtnText: { color: 'white', fontWeight: '900', fontSize: 15, letterSpacing: 1 },
   emptyContainer: { alignItems: 'center', marginTop: 100 },
-  emptyText: { fontSize: 22, fontWeight: 'bold' },
+  emptyText: { fontSize: 16, fontWeight: '700' },
   recipeContainer: { padding: 20 },
-  infoBox: { padding: 20, borderRadius: 20, marginBottom: 20 },
-  infoTitle: { fontSize: 18, fontWeight: '800', marginBottom: 5 },
-  addRecipeBtn: { padding: 15, borderRadius: 12, alignItems: 'center' },
-  addRecipeBtnText: { color: 'white', fontWeight: '800' },
-  sectionTitle: { fontSize: 16, fontWeight: '900', marginBottom: 10, marginTop: 10 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
-  modalContent: { borderRadius: 28, padding: 25 },
-  modalTitle: { fontSize: 22, fontWeight: '900', marginBottom: 20 },
-  label: { fontSize: 11, fontWeight: '900', color: '#64748b', marginBottom: 8, marginTop: 15, textTransform: 'uppercase' },
-  input: { borderWidth: 1.5, borderRadius: 12, padding: 12, fontSize: 16 },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 20, marginTop: 30 },
+  infoBox: { padding: 25, borderRadius: 24 },
+  infoTitle: { fontSize: 18, fontWeight: '900', marginBottom: 8 },
+  addRecipeBtn: { padding: 16, borderRadius: 15, alignItems: 'center' },
+  addRecipeBtnText: { color: 'white', fontWeight: '900' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 20 },
+  modalContent: { borderRadius: 30, padding: 25, maxHeight: '90%' },
+  modalTitle: { fontSize: 24, fontWeight: '900', marginBottom: 20 },
+  label: { fontSize: 10, fontWeight: '900', color: '#94a3b8', marginBottom: 8, marginTop: 15, textTransform: 'uppercase' },
+  input: { borderWidth: 2, borderRadius: 15, padding: 15, fontSize: 16, fontWeight: '600' },
+  plusBtn: { width: 55, height: 55, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
+  tempList: { marginTop: 20, gap: 10 },
+  tempItem: { flexDirection: 'row', padding: 15, borderRadius: 15, alignItems: 'center', borderWidth: 1 },
+  modalActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 35 },
   cancelBtn: { padding: 10 },
-  saveBtn: { paddingHorizontal: 25, paddingVertical: 12, borderRadius: 12 }
+  saveBtn: { paddingHorizontal: 25, paddingVertical: 15, borderRadius: 15 }
 });

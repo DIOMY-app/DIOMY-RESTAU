@@ -1,21 +1,24 @@
 /**
  * AppContext - Global State Management for O'PIED DU MONT
  * Emplacement : racine (./app-context.tsx)
- * Mise à jour : Multi-Paniers + Sessions de Caisse + Synchronisation Supabase
+ * Version : 3.4 - Support Marketing & Rentabilité
+ * Règle n°2 : Code complet fourni.
  */
 
 import React, { createContext, useReducer, ReactNode, useContext, useEffect } from 'react';
-import { supabase } from './supabase'; // Vérifie bien que ton fichier supabase.ts est à la racine
+import { supabase } from './supabase'; 
 import type { AppContextType, User, CartItem, Order, MenuItem, Category, StockItem, Employee } from './types';
 
-// ─── EXTENSION DU TYPE POUR MULTI-PANIER & GESTION ───────────────────────────
+// ─── EXTENSION DU TYPE ───────────────────────────────────────────────────────
 
 export interface MultiCartState extends AppContextType {
   carts: { [key: number]: CartItem[] };
   activeTab: number;
   chargesFixes: any[];
   rentabilitePlats: any[];
-  currentSession: any | null; // Pour stocker la session de caisse active
+  currentSession: any | null; 
+  activeCashierId: string | null; 
+  marketingCount: number; // Badge pour la relance client
 }
 
 // ─── TYPES & ACTIONS ──────────────────────────────────────────────────────────
@@ -31,7 +34,10 @@ export type AppAction =
   | { type: 'CLEAR_CART' }
   | { type: 'SET_DATA'; payload: any }
   | { type: 'SET_SESSION'; payload: any }
+  | { type: 'SWITCH_CASHIER'; payload: string } 
   | { type: 'ADD_ORDER'; payload: Order }
+  | { type: 'UPDATE_ORDER'; payload: Order }
+  | { type: 'SET_MARKETING_COUNT'; payload: number }
   | { type: 'RESET' };
 
 export const initialState: MultiCartState = {
@@ -49,6 +55,8 @@ export const initialState: MultiCartState = {
   chargesFixes: [],
   rentabilitePlats: [],
   currentSession: null,
+  activeCashierId: null,
+  marketingCount: 0,
 };
 
 export const AppContext = createContext<{
@@ -75,8 +83,18 @@ function appReducer(state: MultiCartState, action: AppAction): MultiCartState {
     case 'SET_DATA':
       return { ...state, ...action.payload, isLoading: false };
     case 'SET_SESSION':
-      return { ...state, currentSession: action.payload };
+      return { 
+        ...state, 
+        currentSession: action.payload,
+        activeCashierId: action.payload ? action.payload.employe_id : state.activeCashierId 
+      };
     
+    case 'SWITCH_CASHIER':
+      return { ...state, activeCashierId: action.payload };
+
+    case 'SET_MARKETING_COUNT':
+      return { ...state, marketingCount: action.payload };
+
     case 'ADD_TO_CART': {
       const existingItemIndex = currentCart.findIndex(
         (item) => item.menuItemId === action.payload.menuItemId && item.name === action.payload.name
@@ -113,8 +131,19 @@ function appReducer(state: MultiCartState, action: AppAction): MultiCartState {
     case 'CLEAR_CART':
       return { ...state, carts: { ...state.carts, [currentTab]: [] }, cart: [] };
 
-    case 'ADD_ORDER':
+    case 'ADD_ORDER': {
+      const exists = state.orders.some(o => o.id === action.payload.id);
+      if (exists) return state;
       return { ...state, orders: [action.payload, ...(state.orders || [])] };
+    }
+
+    case 'UPDATE_ORDER':
+      return {
+        ...state,
+        orders: state.orders.map((o) => 
+          o.id === action.payload.id ? action.payload : o
+        )
+      };
 
     case 'RESET':
       return { ...initialState };
@@ -129,22 +158,31 @@ function appReducer(state: MultiCartState, action: AppAction): MultiCartState {
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
-  // Fonction pour charger les données depuis Supabase
   const loadData = async () => {
     dispatch({ type: 'SET_LOADING', payload: true });
     try {
+      const fifteenDaysAgo = new Date();
+      fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+
       const [
         { data: cats },
         { data: menu },
         { data: stock },
         { data: emps },
-        { data: session }
+        { data: session },
+        { data: charges },
+        { count: mCount }
       ] = await Promise.all([
         supabase.from('categories').select('*').order('nom'),
         supabase.from('menu').select('*').order('nom'),
         supabase.from('stock').select('*').order('nom'),
         supabase.from('employes').select('*').order('nom'),
-        supabase.from('sessions_caisse').select('*').eq('statut', 'ouvert').maybeSingle()
+        supabase.from('sessions_caisse').select('*').eq('statut', 'ouvert').maybeSingle(),
+        supabase.from('charges_fixes').select('*').order('nom'),
+        supabase.from('clients')
+          .select('*', { count: 'exact', head: true })
+          .lt('derniere_visite', fifteenDaysAgo.toISOString())
+          .eq('actif', true)
       ]);
 
       dispatch({
@@ -153,9 +191,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           categories: cats || [],
           menuItems: menu || [],
           stockItems: stock || [],
-          employees: emps || []
+          employees: emps || [],
+          chargesFixes: charges || [],
+          marketingCount: mCount || 0
         }
       });
+      
       if (session) dispatch({ type: 'SET_SESSION', payload: session });
       
     } catch (err: any) {
