@@ -1,7 +1,7 @@
 /**
  * Orders / Cart Screen - O'PIED DU MONT Mobile
  * Emplacement : /app/orders.tsx
- * Version : 3.7 - Flux de commande fluide & Bouton d'action rapide
+ * Version : 3.8 - Navigation Multi-Écrans & Correction Visibilité Serveur
  * Règle n°2 : Code complet fourni.
  */
 
@@ -47,9 +47,6 @@ export default function OrdersScreen() {
     }
   };
 
-  /**
-   * LOGIQUE DE DÉSTOCKAGE
-   */
   const processDestocking = async () => {
     try {
       for (const item of cart) {
@@ -92,7 +89,10 @@ export default function OrdersScreen() {
           onPress: async () => {
             setIsProcessing(true);
             try {
-              await processDestocking();
+              // On ne déstocke que si c'est une vente finale (admin/caissier)
+              if (isCaissierResponsable) {
+                await processDestocking();
+              }
               
               const { data: orderData, error: orderError } = await supabase
                 .from('orders')
@@ -109,6 +109,7 @@ export default function OrdersScreen() {
 
               if (orderError) throw orderError;
 
+              // Envoi systématique en cuisine pour préparation
               await supabase.from('preparation_cuisine').insert([{
                 order_id: orderData.id,
                 items: cart,
@@ -119,7 +120,8 @@ export default function OrdersScreen() {
               await refreshAppData(dispatch);
               
               Alert.alert("Succès ✅", isCaissierResponsable ? "Vente encaissée !" : "Bon envoyé en cuisine !");
-              router.replace('/'); 
+              // Redirection vers l'historique pour voir la commande apparaître
+              router.push('/sales' as any); 
             } catch (err: any) {
               Alert.alert("Erreur", err.message);
             } finally {
@@ -135,18 +137,24 @@ export default function OrdersScreen() {
     <ScreenContainer>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View style={styles.headerTop}>
-          <Text style={[styles.title, { color: colors.foreground }]}>Panier #{activeTab + 1}</Text>
+          <View>
+            <Text style={[styles.title, { color: colors.foreground }]}>Panier #{activeTab + 1}</Text>
+            <TouchableOpacity onPress={() => router.push('/sales' as any)}>
+               <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>Voir l'historique des ventes →</Text>
+            </TouchableOpacity>
+          </View>
+          
           <TouchableOpacity 
-            style={[styles.addMoreBtn, { backgroundColor: colors.primary + '15' }]}
+            style={[styles.addMoreBtn, { backgroundColor: colors.primary }]}
             onPress={() => router.push('/menu' as any)}
           >
-            <Text style={{ color: colors.primary, fontWeight: 'bold' }}>+ Ajouter des plats</Text>
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>+ MENU</Text>
           </TouchableOpacity>
         </View>
         
         <View style={[styles.roleBadge, { backgroundColor: isCaissierResponsable ? '#dcfce7' : '#fff7ed' }]}>
             <Text style={{ color: isCaissierResponsable ? '#166534' : '#c2410c', fontWeight: '800', fontSize: 11, textTransform: 'uppercase' }}>
-                {isCaissierResponsable ? "💳 Mode Encaisssement" : "📝 Mode Prise de Commande"}
+                {isCaissierResponsable ? "💳 Mode Encaissement" : "📝 Mode Serveur (Prise de commande)"}
             </Text>
         </View>
       </View>
@@ -184,18 +192,18 @@ export default function OrdersScreen() {
         ) : (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconContainer}>
-                <Text style={{ fontSize: 50 }}>🍲</Text>
+                <Text style={{ fontSize: 50 }}>🛒</Text>
             </View>
-            <Text style={[styles.emptyText, { color: colors.foreground }]}>Votre panier est vide</Text>
-            <Text style={{ color: colors.muted, textAlign: 'center', marginBottom: 30 }}>
-              Commencez par sélectionner des plats dans le menu.
+            <Text style={[styles.emptyText, { color: colors.foreground }]}>Panier vide</Text>
+            <Text style={{ color: colors.muted, textAlign: 'center', marginBottom: 30, paddingHorizontal: 20 }}>
+              Sélectionnez les plats demandés par le client dans le menu pour créer une commande.
             </Text>
             
             <TouchableOpacity 
               onPress={() => router.push('/menu' as any)}
               style={[styles.mainMenuBtn, { backgroundColor: colors.primary }]}
             >
-              <Text style={styles.mainMenuBtnText}>OUVRIR LE MENU</Text>
+              <Text style={styles.mainMenuBtnText}>📦 ALLER AU MENU</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -207,10 +215,6 @@ export default function OrdersScreen() {
             <Text style={{ color: colors.muted, fontSize: 15 }}>Sous-total</Text>
             <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: '700' }}>{formatPrice(subtotal)}</Text>
           </View>
-          <View style={styles.summaryRow}>
-            <Text style={{ color: colors.muted, fontSize: 15 }}>Service (5%)</Text>
-            <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: '700' }}>{formatPrice(serviceCharge)}</Text>
-          </View>
           
           <View style={[styles.totalRow, { borderTopColor: colors.border }]}>
             <Text style={[styles.totalText, { color: colors.foreground }]}>TOTAL</Text>
@@ -218,7 +222,7 @@ export default function OrdersScreen() {
           </View>
 
           <TouchableOpacity 
-            style={[styles.submitBtn, { backgroundColor: isProcessing ? colors.muted : (isCaissierResponsable ? '#22c55e' : colors.primary) }]}
+            style={[styles.submitBtn, { backgroundColor: isProcessing ? colors.muted : (isCaissierResponsable ? '#22c55e' : '#3b82f6') }]}
             onPress={handleValidation}
             disabled={isProcessing}
           >
@@ -226,7 +230,7 @@ export default function OrdersScreen() {
               <ActivityIndicator color="white" />
             ) : (
               <Text style={styles.submitBtnText}>
-                  {isCaissierResponsable ? "ENCAISSER MAINTENANT" : "ENVOYER EN CUISINE"}
+                  {isCaissierResponsable ? "ENCAISSER LA VENTE" : "ENVOYER LE BON EN CUISINE"}
               </Text>
             )}
           </TouchableOpacity>
@@ -238,9 +242,9 @@ export default function OrdersScreen() {
 
 const styles = StyleSheet.create({
   header: { padding: 25, paddingBottom: 20, borderBottomWidth: 1 },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   title: { fontSize: 28, fontWeight: '900', letterSpacing: -1 },
-  addMoreBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  addMoreBtn: { paddingHorizontal: 15, paddingVertical: 10, borderRadius: 12, elevation: 2 },
   roleBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, marginTop: 10 },
   list: { paddingHorizontal: 25, paddingBottom: 40 },
   item: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 18, borderBottomWidth: 1 },
@@ -257,9 +261,9 @@ const styles = StyleSheet.create({
   totalAmount: { fontSize: 26, fontWeight: '900' },
   submitBtn: { borderRadius: 18, paddingVertical: 18, alignItems: 'center', marginTop: 20, elevation: 4 },
   submitBtnText: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
-  emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 80, paddingHorizontal: 20 },
+  emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 60, paddingHorizontal: 20 },
   emptyIconContainer: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  emptyText: { fontSize: 22, fontWeight: '800', marginBottom: 10 },
-  mainMenuBtn: { width: '100%', paddingVertical: 20, borderRadius: 15, alignItems: 'center' },
+  emptyText: { fontSize: 24, fontWeight: '900', marginBottom: 10 },
+  mainMenuBtn: { width: '100%', paddingVertical: 20, borderRadius: 18, alignItems: 'center', elevation: 3 },
   mainMenuBtnText: { color: 'white', fontWeight: '900', fontSize: 16, letterSpacing: 1 }
 });
