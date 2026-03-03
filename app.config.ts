@@ -1,9 +1,18 @@
+/**
+ * Configuration Expo - O'PIED DU MONT
+ * Emplacement : /app.config.ts
+ * Version : Corrigée Typage Expo (ON_LOAD)
+ * Règle n°2 : Toujours fournir le code complet.
+ */
+
 import type { ExpoConfig } from "expo/config";
 
 const config: ExpoConfig = {
   name: "O'PIED DU MONT",
   slug: "opied-du-mont-mobile",
   version: "1.0.0",
+  // Ajout de l'owner pour lever les erreurs d'identification EAS
+  owner: "diomy", 
   orientation: "portrait",
   icon: "./assets/logo.png",
   scheme: "opm-app",
@@ -28,11 +37,15 @@ const config: ExpoConfig = {
     output: "static",
     favicon: "./assets/logo.png",
   },
-  // Configuration pour EAS Update
+  // CONFIGURATION EAS UPDATE CORRIGÉE (Typage valide)
   updates: {
-    url: "https://u.expo.dev/5accbe7c-8052-4c53-9e57-ca8eef4c83fb"
+    url: "https://u.expo.dev/5accbe7c-8052-4c53-9e57-ca8eef4c83fb",
+    // "ON_LOAD" est la valeur correcte pour déclencher l'update à l'ouverture
+    checkAutomatically: "ON_LOAD",
+    // On laisse 30 secondes pour le téléchargement
+    fallbackToCacheTimeout: 30000 
   },
-  // CORRECTION : On fixe la version à "1.0.0" pour forcer la compatibilité avec le build installé
+  // On maintient la version 1.0.0 pour correspondre au build installé
   runtimeVersion: "1.0.0",
   extra: {
     eas: {
