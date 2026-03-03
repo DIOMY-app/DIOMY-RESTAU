@@ -1,8 +1,7 @@
 /**
  * Configuration Expo - O'PIED DU MONT
  * Emplacement : /app.config.ts
- * Version : Optimisée pour SDK 51 et EAS Updates
- * Règle n°2 : Toujours fournir le code complet.
+ * Version : Fingerprint automatique SDK 51+
  */
 
 import type { ExpoConfig } from "expo/config";
@@ -11,8 +10,7 @@ const config: ExpoConfig = {
   name: "O'PIED DU MONT",
   slug: "opied-du-mont-mobile",
   version: "1.0.0",
-  // L'owner permet de garantir la liaison avec ton compte Expo diomy
-  owner: "diomy", 
+  owner: "diomy",
   orientation: "portrait",
   icon: "./assets/logo.png",
   scheme: "opm-app",
@@ -37,14 +35,14 @@ const config: ExpoConfig = {
     output: "static",
     favicon: "./assets/logo.png",
   },
-  // CONFIGURATION EAS UPDATE MISE À JOUR
   updates: {
     url: "https://u.expo.dev/5accbe7c-8052-4c53-9e57-ca8eef4c83fb",
     checkAutomatically: "ON_LOAD",
-    // Suppression de fallbackToCacheTimeout car déprécié au profit de la gestion native du SDK 51
   },
-  // Crucial : doit correspondre au build pour que l'update soit acceptée
-  runtimeVersion: "1.0.0",
+  // ✅ Fingerprint automatique — EAS calcule l'empreinte du build natif
+  runtimeVersion: {
+    policy: "fingerprint"
+  },
   extra: {
     eas: {
       projectId: "5accbe7c-8052-4c53-9e57-ca8eef4c83fb"
